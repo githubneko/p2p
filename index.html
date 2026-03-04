@@ -1,572 +1,116 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>最终稳定版P2P文件传输</title>
+    <title>Private Browser BT</title>
+    <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
     <style>
-        body { max-width: 700px; margin: 20px auto; padding: 20px; font-family: Arial, sans-serif; background: #f5f5f5; }
-        .box { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
-        h2 { margin-top: 0; color: #333; font-size: 18px; }
-        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-size: 15px; cursor: pointer; margin: 5px 0; width: 100%; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        .btn-force { background: #ff3d00; margin-top: 10px; }
-        textarea { width: 100%; height: 100px; margin: 10px 0; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; font-family: monospace; font-size: 12px; }
-        .status { padding: 12px; border-radius: 8px; margin: 10px 0; font-weight: bold; }
-        .ok { background: #d4edda; color: #155724; }
-        .err { background: #f8d7da; color: #721c24; }
-        .info { background: #d1ecf1; color: #0c5460; }
-        .warning { background: #fff3cd; color: #856404; }
-        .progress-container { margin: 15px 0; }
-        .progress-bar { height: 25px; background: #e9ecef; border-radius: 5px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #007bff, #28a745); width: 0%; transition: width 0.2s linear; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; }
-        .file-list { margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 8px; }
-        .file-item { padding: 8px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-        .file-item:last-child { border-bottom: none; }
-        .download-link { display: block; margin-top: 10px; padding: 12px; background: #28a745; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-weight: bold; }
-        .debug-log { margin-top: 15px; padding: 10px; background: #1e1e1e; color: #00ff00; border-radius: 8px; font-family: monospace; font-size: 12px; max-height: 150px; overflow-y: auto; }
+        body {
+            font-family: sans-serif;
+            max-width: 800px;
+            margin: auto;
+        }
+
+        #drop {
+            border: 2px dashed #666;
+            padding: 40px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        progress {
+            width: 100%;
+            height: 20px;
+        }
     </style>
 </head>
+
 <body>
 
-    <h1>🔧 最终稳定版P2P文件传输</h1>
+    <h2>私密浏览器 BT 传输</h2>
 
-    <!-- ========================================== -->
-    <!-- 发送方（房主） -->
-    <!-- ========================================== -->
-    <div class="box">
-        <h2>📤 发送方（房主）</h2>
-        <div id="host-status" class="status info">步骤1：选择要发送的文件</div>
-        
-        <!-- 文件选择 -->
-        <input type="file" id="host-file" multiple>
-        <div id="host-file-list" class="file-list" style="display: none;"></div>
-        
-        <!-- 生成连接名片 -->
-        <button id="host-create-offer" disabled>步骤2：生成连接名片</button>
-        <!-- 强制启用按钮（应急用） -->
-        <button id="host-force-enable" class="btn-force">⚠️ 应急：强制启用生成按钮</button>
-        <textarea id="host-offer" readonly placeholder="生成后，复制这里的内容发给接收方"></textarea>
-        <button id="host-copy-offer" disabled>复制连接名片</button>
+    房间号：<input id="room" value="room123">
+    <button id="init">初始化客户端</button>
 
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+    <h3>生成的 Magnet</h3>
+    <textarea id="magnet" style="width:100%;height:80px;"></textarea>
 
-        <!-- 确认连接 -->
-        <p style="font-weight: 500;">步骤3：粘贴接收方发回的名片：</p>
-        <textarea id="host-answer" placeholder="粘贴接收方发回的内容"></textarea>
-        <button id="host-connect" disabled>步骤4：确认连接，开始传输</button>
+    <div id="drop">拖拽文件到这里开始做种</div>
 
-        <!-- 传输进度 -->
-        <div class="progress-container" id="host-progress" style="display: none;">
-            <div class="progress-bar">
-                <div id="host-progress-fill" class="progress-fill">0%</div>
-            </div>
-        </div>
+    <h3>下载</h3>
+    <input id="magnetInput" placeholder="粘贴 magnet 链接">
+    <button id="downloadBtn">开始下载</button>
 
-        <!-- 调试日志 -->
-        <div class="debug-log" id="host-log">发送方日志：页面加载中...</div>
-    </div>
-
-    <!-- ========================================== -->
-    <!-- 接收方 -->
-    <!-- ========================================== -->
-    <div class="box">
-        <h2>📥 接收方</h2>
-        <div id="client-status" class="status info">步骤1：粘贴发送方的连接名片</div>
-
-        <!-- 解析连接名片 -->
-        <textarea id="client-offer" placeholder="粘贴发送方发来的连接名片"></textarea>
-        <button id="client-create-answer" disabled>步骤2：生成我的名片</button>
-
-        <textarea id="client-answer" readonly placeholder="生成后，复制这里的内容发回给发送方"></textarea>
-        <button id="client-copy-answer" disabled>复制我的名片</button>
-
-        <!-- 接收进度 -->
-        <div class="progress-container" id="client-progress" style="display: none;">
-            <div class="progress-bar">
-                <div id="client-progress-fill" class="progress-fill">0%</div>
-            </div>
-        </div>
-
-        <!-- 已接收文件 -->
-        <div id="received-files" class="file-list" style="display: none;">
-            <h3 style="margin-top: 0; margin-bottom: 10px;">📦 已接收文件</h3>
-            <div id="files-container"></div>
-        </div>
-
-        <!-- 调试日志 -->
-        <div class="debug-log" id="client-log">接收方日志：页面加载中...</div>
-    </div>
+    <h3>进度</h3>
+    <progress id="progress" value="0" max="100"></progress>
 
     <script>
-        // ==========================================
-        // 全局配置
-        // ==========================================
-        const CONFIG = {
-            iceServers: [
-                { urls: 'stun:stun.qq.com:3478' },
-                { urls: 'stun:stun.cloudflare.com:3478' }
-            ],
-            chunkSize: 16384,
-            handshakeTimeout: 3000,
-            maxRetries: 3
+
+        let client;
+
+        init.onclick = () => {
+            client = new WebTorrent({
+                tracker: {
+                    rtcConfig: {
+                        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+                    }
+                },
+                dht: false
+            });
+            alert("客户端初始化完成");
         };
 
-        // 全局变量
-        let hostPeer = null;
-        let clientPeer = null;
-        let filesToSend = [];
-        let hostChannel = null;
-        let isChannelReady = false;
+        drop.ondragover = e => e.preventDefault();
 
-        // ==========================================
-        // 工具函数
-        // ==========================================
-        function setStatus(element, text, type = 'info') {
-            element.textContent = text;
-            element.className = `status ${type}`;
-            console.log(`[${type}]`, text);
-        }
+        drop.ondrop = e => {
+            e.preventDefault();
+            const file = e.dataTransfer.files[0];
+            if (!file) return;
 
-        function addLog(element, text) {
-            const time = new Date().toLocaleTimeString();
-            element.innerHTML += `\n[${time}] ${text}`;
-            element.scrollTop = element.scrollHeight;
-        }
+            const roomName = room.value;
 
-        function formatSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
+            client.seed(file, {
+                announce: [
+                    "wss://tracker.openwebtorrent.com"
+                ],
+                name: file.name + "_" + roomName
+            }, torrent => {
+                magnet.value = torrent.magnetURI;
+                console.log("Seeding:", torrent.magnetURI);
+            });
+        };
 
-        function sleep(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
+        downloadBtn.onclick = () => {
+            const uri = magnetInput.value;
 
-        async function sendReliable(channel, data) {
-            for (let i = 0; i < CONFIG.maxRetries; i++) {
-                if (channel.readyState !== 'open') {
-                    addLog(document.getElementById('host-log'), `指令发送重试${i+1}次`);
-                    await sleep(200);
-                    continue;
-                }
-                channel.send(JSON.stringify(data));
-                await sleep(100);
-                addLog(document.getElementById('host-log'), `指令已发送：${data.type}`);
-                return true;
-            }
-            throw new Error(`指令${data.type}发送失败`);
-        }
+            client.add(uri, {
+                announce: [
+                    "wss://tracker.openwebtorrent.com"
+                ]
+            }, torrent => {
 
-        // ==========================================
-        // 【核心修复】页面完全加载后，再执行所有逻辑
-        // ==========================================
-        window.onload = async () => {
-            addLog(document.getElementById('host-log'), '页面DOM加载完成，开始初始化元素');
-            addLog(document.getElementById('client-log'), '页面DOM加载完成，开始初始化元素');
-
-            // 先获取所有DOM元素，确保存在
-            const dom = {
-                // 发送方
-                hostStatus: document.getElementById('host-status'),
-                hostFile: document.getElementById('host-file'),
-                hostFileList: document.getElementById('host-file-list'),
-                hostCreateOffer: document.getElementById('host-create-offer'),
-                hostForceEnable: document.getElementById('host-force-enable'),
-                hostOffer: document.getElementById('host-offer'),
-                hostCopyOffer: document.getElementById('host-copy-offer'),
-                hostAnswer: document.getElementById('host-answer'),
-                hostConnect: document.getElementById('host-connect'),
-                hostProgress: document.getElementById('host-progress'),
-                hostProgressFill: document.getElementById('host-progress-fill'),
-                hostLog: document.getElementById('host-log'),
-                // 接收方
-                clientStatus: document.getElementById('client-status'),
-                clientOffer: document.getElementById('client-offer'),
-                clientCreateAnswer: document.getElementById('client-create-answer'),
-                clientAnswer: document.getElementById('client-answer'),
-                clientCopyAnswer: document.getElementById('client-copy-answer'),
-                clientProgress: document.getElementById('client-progress'),
-                clientProgressFill: document.getElementById('client-progress-fill'),
-                receivedFiles: document.getElementById('received-files'),
-                filesContainer: document.getElementById('files-container'),
-                clientLog: document.getElementById('client-log')
-            };
-
-            // 校验DOM元素是否全部加载成功
-            const missingElements = Object.entries(dom).filter(([key, el]) => !el);
-            if (missingElements.length > 0) {
-                addLog(dom.hostLog, `❌ 缺失DOM元素：${missingElements.map(i => i[0]).join(',')}`);
-                return;
-            }
-            addLog(dom.hostLog, '✅ 所有DOM元素加载完成，事件绑定开始');
-            addLog(dom.clientLog, '✅ 所有DOM元素加载完成，事件绑定开始');
-
-            // 初始化状态
-            setStatus(dom.hostStatus, '页面就绪，请选择文件开始', 'info');
-            setStatus(dom.clientStatus, '页面就绪，等待发送方的连接名片', 'info');
-
-            // ==========================================
-            // 【核心修复】文件选择事件绑定（100%触发）
-            // ==========================================
-            dom.hostFile.addEventListener('change', (e) => {
-                addLog(dom.hostLog, `✅ 文件选择事件触发，共选择${e.target.files.length}个文件`);
-                filesToSend = Array.from(e.target.files);
-
-                // 不管文件是否有效，先输出日志，再处理逻辑
-                if (filesToSend.length === 0) {
-                    setStatus(dom.hostStatus, '❌ 未选择有效文件', 'err');
-                    dom.hostCreateOffer.disabled = true;
-                    return;
-                }
-
-                // 渲染文件列表
-                let html = '<h3 style="margin:0 0 10px 0;">已选择文件：</h3>';
-                let totalSize = 0;
-                filesToSend.forEach((file, index) => {
-                    html += `
-                        <div class="file-item">
-                            <span>${index+1}. ${file.name}</span>
-                            <span>${formatSize(file.size)}</span>
-                        </div>
-                    `;
-                    totalSize += file.size;
+                torrent.on("download", () => {
+                    const percent = (torrent.progress * 100).toFixed(2);
+                    progress.value = percent;
                 });
-                dom.hostFileList.innerHTML = html;
-                dom.hostFileList.style.display = 'block';
 
-                // 【关键修复】无条件启用生成按钮，哪怕文件是空的
-                dom.hostCreateOffer.disabled = false;
-                setStatus(dom.hostStatus, `已选择${filesToSend.length}个文件，总大小${formatSize(totalSize)}`, 'ok');
-                addLog(dom.hostLog, `✅ 生成名片按钮已启用`);
-            });
-
-            // ==========================================
-            // 应急强制启用按钮
-            // ==========================================
-            dom.hostForceEnable.addEventListener('click', () => {
-                dom.hostCreateOffer.disabled = false;
-                setStatus(dom.hostStatus, '⚠️ 已强制启用生成按钮', 'warning');
-                addLog(dom.hostLog, `✅ 应急强制启用按钮已触发`);
-            });
-
-            // ==========================================
-            // 生成连接名片（Offer）
-            // ==========================================
-            dom.hostCreateOffer.addEventListener('click', async () => {
-                setStatus(dom.hostStatus, '正在创建P2P连接，生成连接名片...', 'info');
-                addLog(dom.hostLog, '开始创建RTCPeerConnection');
-
-                if (hostPeer) {
-                    hostPeer.close();
-                    isChannelReady = false;
-                }
-
-                try {
-                    hostPeer = new RTCPeerConnection(CONFIG);
-                    hostChannel = hostPeer.createDataChannel('fileTransfer', {
-                        ordered: true,
-                        maxRetransmits: 5
+                torrent.on("done", () => {
+                    torrent.files.forEach(file => {
+                        file.getBlobURL((err, url) => {
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = file.name;
+                            a.click();
+                        });
                     });
+                });
 
-                    // 通道状态监听
-                    hostChannel.onopen = () => {
-                        isChannelReady = true;
-                        setStatus(dom.hostStatus, '✅ 通道已就绪，等待握手确认', 'ok');
-                        addLog(dom.hostLog, '数据通道已打开');
-                    };
-
-                    hostChannel.onclose = () => {
-                        isChannelReady = false;
-                        addLog(dom.hostLog, '数据通道已关闭');
-                    };
-
-                    hostChannel.onerror = (err) => {
-                        setStatus(dom.hostStatus, `通道错误：${err.message}`, 'err');
-                        addLog(dom.hostLog, `通道错误：${err.message}`);
-                    };
-
-                    // 生成Offer
-                    const offer = await hostPeer.createOffer();
-                    await hostPeer.setLocalDescription(offer);
-                    addLog(dom.hostLog, 'Offer生成成功');
-
-                    // 强制1秒后输出Offer，确保用户一定能拿到
-                    setTimeout(() => {
-                        dom.hostOffer.value = JSON.stringify(hostPeer.localDescription);
-                        dom.hostCopyOffer.disabled = false;
-                        dom.hostConnect.disabled = false;
-                        setStatus(dom.hostStatus, '✅ 连接名片生成成功！请复制发给接收方', 'ok');
-                        addLog(dom.hostLog, '连接名片已输出到文本框');
-                    }, 1000);
-
-                    // ICE候选监听
-                    hostPeer.onicecandidate = (e) => {
-                        if (e.candidate) {
-                            addLog(dom.hostLog, `ICE候选已收集：${e.candidate.address}`);
-                        }
-                    };
-
-                } catch (e) {
-                    setStatus(dom.hostStatus, `生成失败：${e.message}`, 'err');
-                    addLog(dom.hostLog, `生成异常：${e.message}`);
-                }
-            });
-
-            // 复制Offer
-            dom.hostCopyOffer.addEventListener('click', () => {
-                dom.hostOffer.select();
-                document.execCommand('copy');
-                setStatus(dom.hostStatus, '✅ 连接名片已复制', 'ok');
-                addLog(dom.hostLog, 'Offer已复制');
-            });
-
-            // 确认连接
-            dom.hostConnect.addEventListener('click', async () => {
-                const answerStr = dom.hostAnswer.value.trim();
-                if (!answerStr) {
-                    setStatus(dom.hostStatus, '请先粘贴接收方发回的名片！', 'err');
-                    return;
-                }
-
-                try {
-                    const answer = JSON.parse(answerStr);
-                    await hostPeer.setRemoteDescription(new RTCSessionDescription(answer));
-                    setStatus(dom.hostStatus, '✅ 已接收对方名片，等待通道建立...', 'ok');
-                    addLog(dom.hostLog, '已设置接收方Answer');
-                } catch (e) {
-                    setStatus(dom.hostStatus, `名片格式错误：${e.message}`, 'err');
-                    addLog(dom.hostLog, `Answer解析失败：${e.message}`);
-                }
-            });
-
-            // 握手+传输逻辑
-            hostChannel?.onopen = async () => {
-                isChannelReady = true;
-                setStatus(dom.hostStatus, '✅ 通道已就绪，正在握手...', 'ok');
-                addLog(dom.hostLog, '通道已打开，开始握手');
-
-                try {
-                    // 握手确认
-                    await sendReliable(hostChannel, { type: 'handshake', fileCount: filesToSend.length });
-                    let handshakeAck = false;
-                    hostChannel.onmessage = (e) => {
-                        if (typeof e.data === 'string') {
-                            const msg = JSON.parse(e.data);
-                            if (msg.type === 'handshake-ack') {
-                                handshakeAck = true;
-                                addLog(dom.hostLog, '收到接收方握手确认');
-                            }
-                        }
-                    };
-
-                    // 等待握手确认
-                    for (let i = 0; i < 30; i++) {
-                        if (handshakeAck) break;
-                        await sleep(100);
-                    }
-                    if (!handshakeAck) throw new Error('接收方握手超时');
-
-                    // 开始传输
-                    dom.hostProgress.style.display = 'block';
-                    let totalSizeAll = filesToSend.reduce((sum, f) => sum + f.size, 0);
-                    let totalSentAll = 0;
-
-                    for (let fileIndex = 0; fileIndex < filesToSend.length; fileIndex++) {
-                        const file = filesToSend[fileIndex];
-                        setStatus(dom.hostStatus, `📤 正在传输：${file.name} (${fileIndex+1}/${filesToSend.length})`, 'info');
-                        addLog(dom.hostLog, `开始传输：${file.name}`);
-
-                        // 读取文件
-                        const arrayBuffer = await new Promise((resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.onload = (e) => resolve(e.target.result);
-                            reader.onerror = reject;
-                            reader.readAsArrayBuffer(file);
-                        });
-
-                        // 发送文件信息
-                        await sendReliable(hostChannel, {
-                            type: 'file-info',
-                            name: file.name,
-                            size: file.size,
-                            type: file.type,
-                            index: fileIndex + 1,
-                            total: filesToSend.length
-                        });
-
-                        // 分块传输
-                        const chunkSize = CONFIG.chunkSize;
-                        let offset = 0;
-
-                        while (offset < arrayBuffer.byteLength) {
-                            if (hostChannel.readyState !== 'open') throw new Error('通道已关闭');
-                            const chunk = arrayBuffer.slice(offset, offset + chunkSize);
-                            hostChannel.send(chunk);
-                            offset += chunkSize;
-                            totalSentAll += chunkSize;
-
-                            // 更新进度
-                            const percent = Math.round((totalSentAll / totalSizeAll) * 100);
-                            dom.hostProgressFill.style.width = `${percent}%`;
-                            dom.hostProgressFill.textContent = `${percent}%`;
-
-                            // 缓冲区保护
-                            if (hostChannel.bufferedAmount > 1024 * 1024) {
-                                await new Promise(resolve => {
-                                    hostChannel.onbufferedamountlow = resolve;
-                                });
-                            }
-                            await sleep(5);
-                        }
-
-                        // 文件结束标记
-                        await sendReliable(hostChannel, { type: 'file-end' });
-                        addLog(dom.hostLog, `文件${file.name}传输完成`);
-                        await sleep(100);
-                    }
-
-                    // 全部传输完成
-                    await sendReliable(hostChannel, { type: 'transfer-complete' });
-                    setStatus(dom.hostStatus, `✅ 所有文件传输完成！共${filesToSend.length}个`, 'ok');
-                    addLog(dom.hostLog, '全部文件传输完成');
-                    dom.hostProgressFill.style.width = '100%';
-                    dom.hostProgressFill.textContent = '100%';
-
-                } catch (e) {
-                    setStatus(dom.hostStatus, `传输失败：${e.message}`, 'err');
-                    addLog(dom.hostLog, `传输异常：${e.message}`);
-                }
-            };
-
-            // ==========================================
-            // 接收方逻辑
-            // ==========================================
-            dom.clientOffer.addEventListener('input', () => {
-                if (dom.clientOffer.value.trim()) {
-                    dom.clientCreateAnswer.disabled = false;
-                    addLog(dom.clientLog, '已检测到粘贴的Offer，生成按钮已启用');
-                } else {
-                    dom.clientCreateAnswer.disabled = true;
-                }
-            });
-
-            // 生成Answer
-            dom.clientCreateAnswer.addEventListener('click', async () => {
-                const offerStr = dom.clientOffer.value.trim();
-                if (!offerStr) {
-                    setStatus(dom.clientStatus, '请先粘贴发送方的连接名片！', 'err');
-                    return;
-                }
-
-                setStatus(dom.clientStatus, '正在解析连接名片，生成我的名片...', 'info');
-                addLog(dom.clientLog, '开始解析Offer');
-
-                try {
-                    const offer = JSON.parse(offerStr);
-                    if (clientPeer) clientPeer.close();
-                    clientPeer = new RTCPeerConnection(CONFIG);
-
-                    // 接收状态变量
-                    let currentFile = null;
-                    let receivedChunks = [];
-                    let fileCount = 0;
-                    let receivedCount = 0;
-                    let totalReceivedAll = 0;
-
-                    // 数据通道监听
-                    clientPeer.ondatachannel = (event) => {
-                        const channel = event.channel;
-                        setStatus(dom.clientStatus, '✅ 数据通道已建立，等待握手', 'ok');
-                        dom.clientProgress.style.display = 'block';
-                        dom.receivedFiles.style.display = 'block';
-                        addLog(dom.clientLog, '数据通道已建立');
-
-                        channel.onmessage = (e) => {
-                            // 处理字符串指令
-                            if (typeof e.data === 'string') {
-                                const msg = JSON.parse(e.data);
-                                addLog(dom.clientLog, `收到指令：${msg.type}`);
-
-                                switch (msg.type) {
-                                    case 'handshake':
-                                        fileCount = msg.fileCount;
-                                        channel.send(JSON.stringify({ type: 'handshake-ack' }));
-                                        setStatus(dom.clientStatus, `✅ 握手成功，准备接收${fileCount}个文件`, 'ok');
-                                        break;
-
-                                    case 'file-info':
-                                        currentFile = msg;
-                                        receivedChunks = [];
-                                        receivedCount++;
-                                        setStatus(dom.clientStatus, `📥 正在接收：${currentFile.name} (${receivedCount}/${fileCount})`, 'info');
-                                        break;
-
-                                    case 'file-end':
-                                        const blob = new Blob(receivedChunks, { type: currentFile.type });
-                                        const url = URL.createObjectURL(blob);
-                                        const fileHtml = `
-                                            <div class="file-item">
-                                                <span>${receivedCount}. ${currentFile.name}</span>
-                                                <span>${formatSize(currentFile.size)}</span>
-                                            </div>
-                                            <a href="${url}" download="${currentFile.name}" class="download-link">💾 下载 ${currentFile.name}</a>
-                                        `;
-                                        dom.filesContainer.innerHTML += fileHtml;
-                                        addLog(dom.clientLog, `文件${currentFile.name}接收完成`);
-                                        break;
-
-                                    case 'transfer-complete':
-                                        setStatus(dom.clientStatus, `✅ 所有文件接收完成！共${receivedCount}个`, 'ok');
-                                        dom.clientProgressFill.style.width = '100%';
-                                        dom.clientProgressFill.textContent = '100%';
-                                        break;
-                                }
-                            } 
-                            // 处理二进制数据
-                            else if (currentFile) {
-                                receivedChunks.push(e.data);
-                                totalReceivedAll += e.data.byteLength;
-                                // 更新进度
-                                const percent = Math.min(Math.round((totalReceivedAll / (currentFile.size * fileCount)) * 100), 100);
-                                dom.clientProgressFill.style.width = `${percent}%`;
-                                dom.clientProgressFill.textContent = `${percent}%`;
-                            }
-                        };
-                    };
-
-                    // 生成Answer
-                    await clientPeer.setRemoteDescription(new RTCSessionDescription(offer));
-                    const answer = await clientPeer.createAnswer();
-                    await clientPeer.setLocalDescription(answer);
-                    addLog(dom.clientLog, 'Answer生成成功');
-
-                    // 1秒后输出Answer
-                    setTimeout(() => {
-                        dom.clientAnswer.value = JSON.stringify(clientPeer.localDescription);
-                        dom.clientCopyAnswer.disabled = false;
-                        setStatus(dom.clientStatus, '✅ 我的名片生成成功！请复制发回给发送方', 'ok');
-                        addLog(dom.clientLog, '我的名片已输出');
-                    }, 1000);
-
-                } catch (e) {
-                    setStatus(dom.clientStatus, `处理失败：${e.message}`, 'err');
-                    addLog(dom.clientLog, `解析失败：${e.message}`);
-                }
-            });
-
-            // 复制Answer
-            dom.clientCopyAnswer.addEventListener('click', () => {
-                dom.clientAnswer.select();
-                document.execCommand('copy');
-                setStatus(dom.clientStatus, '✅ 我的名片已复制', 'ok');
-                addLog(dom.clientLog, 'Answer已复制');
             });
         };
+
     </script>
+
 </body>
+
 </html>
