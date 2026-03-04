@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>极简P2P文件传输</title>
+    <title>极简P2P文件传输（WebTorrent版）</title>
     <style>
         * {
             margin: 0;
@@ -30,51 +30,60 @@
             margin-bottom: 24px;
             font-size: 24px;
         }
-        .btn-group {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 16px;
+        .section {
+            margin-bottom: 20px;
+        }
+        .section-title {
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 12px;
+            font-weight: 500;
         }
         button {
-            flex: 1;
-            padding: 14px;
+            padding: 12px 20px;
             border: none;
             border-radius: 8px;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
-        }
-        .btn-host {
             background: #007aff;
             color: white;
         }
-        .btn-host:hover {
+        button:hover {
             background: #0056cc;
         }
-        .btn-join {
-            background: #34c759;
-            color: white;
-        }
-        .btn-join:hover {
-            background: #28a745;
-        }
-        .btn-send {
-            background: #ff9500;
-            color: white;
-            width: 100%;
-            margin-top: 12px;
-        }
-        .btn-send:disabled {
+        button:disabled {
             background: #d1d1d6;
             cursor: not-allowed;
+        }
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            background: white;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 80px;
+            padding: 12px;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 13px;
+            font-family: monospace;
+            resize: vertical;
+            word-break: break-all;
+            margin-bottom: 12px;
         }
         .status {
             padding: 12px;
             border-radius: 8px;
-            margin-bottom: 16px;
             font-size: 14px;
             text-align: center;
+            margin-bottom: 12px;
         }
         .status-info {
             background: #e5f2ff;
@@ -88,264 +97,169 @@
             background: #ffebee;
             color: #c62828;
         }
-        .signal-box {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 16px;
-            font-size: 13px;
-            color: #495057;
-            word-break: break-all;
-            max-height: 120px;
-            overflow-y: auto;
+        .progress-bar {
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            overflow: hidden;
         }
-        .file-area {
-            display: none;
+        .progress-fill {
+            height: 100%;
+            background: #007aff;
+            width: 0%;
+            transition: width 0.3s ease;
         }
-        input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            background: white;
+        .file-info {
             font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
         }
-        .file-result {
-            margin-top: 12px;
-            padding: 12px;
-            border-radius: 8px;
-            background: #f8f9fa;
-            font-size: 14px;
+        .btn-copy {
+            background: #ff9500;
+            margin-right: 8px;
         }
-        .hidden {
-            display: none;
+        .btn-copy:hover {
+            background: #e68900;
         }
     </style>
 </head>
 <body>
-    <h1>📤 极简P2P文件传输</h1>
+    <h1>📤 P2P文件传输（WebTorrent版）</h1>
 
     <div class="container">
-        <div class="btn-group">
-            <button class="btn-host" onclick="createConnection()">创建连接（房主）</button>
-            <button class="btn-join" onclick="joinConnection()">加入连接（接收方）</button>
-        </div>
-
-        <div id="status" class="status status-info">
-            选择角色开始连接，支持电脑↔手机跨设备传输
-        </div>
-
-        <div id="signalBox" class="signal-box hidden">
-            信令将在这里显示，自动复制到剪贴板
-        </div>
-
-        <div id="fileArea" class="file-area">
+        <!-- 分享文件区 -->
+        <div class="section">
+            <div class="section-title">1. 分享文件（生成链接）</div>
             <input type="file" id="fileInput" accept="*">
-            <button class="btn-send" id="sendBtn" disabled onclick="sendFile()">发送文件</button>
-            <div id="fileResult" class="file-result"></div>
+            <button onclick="shareFile()">生成分享链接</button>
+            
+            <div id="shareStatus" class="status status-info">
+                选择文件后点击生成链接，支持任意格式文件
+            </div>
+
+            <textarea id="magnetLink" readonly placeholder="生成的分享链接会显示在这里..."></textarea>
+            <button class="btn-copy" onclick="copyMagnetLink()" disabled>复制链接</button>
+        </div>
+
+        <!-- 下载文件区 -->
+        <div class="section">
+            <div class="section-title">2. 下载文件（粘贴链接）</div>
+            <textarea id="downloadMagnetLink" placeholder="粘贴对方发来的分享链接..."></textarea>
+            <button onclick="downloadFile()">开始下载</button>
+            
+            <div id="downloadStatus" class="status status-info">
+                粘贴链接后点击开始下载
+            </div>
+
+            <div class="progress-bar">
+                <div id="downloadProgress" class="progress-fill"></div>
+            </div>
+
+            <div id="fileResult" class="file-info"></div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+    <!-- 引入WebTorrent核心库（国内CDN） -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/webtorrent/2.1.34/webtorrent.min.js"></script>
     <script>
-        let peer = null;
-        let isHost = false;
-        const statusEl = document.getElementById('status');
-        const signalBox = document.getElementById('signalBox');
-        const fileArea = document.getElementById('fileArea');
-        const sendBtn = document.getElementById('sendBtn');
+        // 创建WebTorrent客户端（自动连接公共Tracker，无需手动信令）
+        const client = new WebTorrent();
+        
+        const fileInput = document.getElementById('fileInput');
+        const magnetLink = document.getElementById('magnetLink');
+        const shareStatus = document.getElementById('shareStatus');
+        const downloadMagnetLink = document.getElementById('downloadMagnetLink');
+        const downloadStatus = document.getElementById('downloadStatus');
+        const downloadProgress = document.getElementById('downloadProgress');
         const fileResult = document.getElementById('fileResult');
+        const copyBtn = document.getElementById('copyMagnetLink');
 
-        // 更新状态提示
-        function updateStatus(text, type = 'info') {
-            statusEl.textContent = text;
-            statusEl.className = `status status-${type}`;
+        // 更新分享状态
+        function updateShareStatus(text, type = 'info') {
+            shareStatus.textContent = text;
+            shareStatus.className = `status status-${type}`;
         }
 
-        // 自动复制到剪贴板
-        async function copyToClipboard(text) {
-            try {
-                await navigator.clipboard.writeText(text);
-                updateStatus('✅ 信令已自动复制到剪贴板，发给对方', 'success');
-                signalBox.textContent = text;
-                signalBox.classList.remove('hidden');
-            } catch (err) {
-                updateStatus('⚠️ 自动复制失败，请手动复制下方信令', 'error');
-                signalBox.textContent = text;
-                signalBox.classList.remove('hidden');
+        // 更新下载状态
+        function updateDownloadStatus(text, type = 'info') {
+            downloadStatus.textContent = text;
+            downloadStatus.className = `status status-${type}`;
+        }
+
+        // ==================== 分享文件（生成磁力链接） ====================
+        function shareFile() {
+            const file = fileInput.files[0];
+            if (!file) {
+                updateShareStatus('⚠️ 请先选择要分享的文件', 'error');
+                return;
             }
+
+            updateShareStatus('🔄 正在生成分享链接...', 'info');
+
+            // 用WebTorrent创建种子并生成磁力链接
+            client.seed(file, (torrent) => {
+                // 生成磁力链接（核心：无需手动信令，直接分享这个链接即可）
+                const link = torrent.magnetURI;
+                magnetLink.value = link;
+                copyBtn.disabled = false;
+                
+                updateShareStatus(`✅ 链接生成成功！文件：${file.name}`, 'success');
+                fileResult.textContent = `分享中：${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+            });
         }
 
-        // 自动从剪贴板读取信令
-        async function pasteFromClipboard() {
-            try {
-                return await navigator.clipboard.readText();
-            } catch (err) {
-                updateStatus('⚠️ 自动读取剪贴板失败，请手动粘贴信令', 'error');
-                return prompt('请粘贴对方发来的信令：');
+        // 复制磁力链接
+        function copyMagnetLink() {
+            magnetLink.select();
+            document.execCommand('copy');
+            updateShareStatus('✅ 链接已复制到剪贴板，发给对方即可', 'success');
+        }
+
+        // ==================== 下载文件（粘贴磁力链接） ====================
+        function downloadFile() {
+            const link = downloadMagnetLink.value.trim();
+            if (!link) {
+                updateDownloadStatus('⚠️ 请先粘贴分享链接', 'error');
+                return;
             }
-        }
 
-        // 重置所有状态
-        function resetAll() {
-            if (peer) {
-                peer.destroy();
-                peer = null;
-            }
-            isHost = false;
-            signalBox.classList.add('hidden');
-            fileArea.style.display = 'none';
-            sendBtn.disabled = true;
-            fileResult.innerHTML = '';
-            updateStatus('已重置，选择角色重新开始', 'info');
-        }
+            // 清空之前的下载状态
+            downloadProgress.style.width = '0%';
+            fileResult.textContent = '';
+            updateDownloadStatus('🔄 正在连接节点并开始下载...', 'info');
 
-        // ==================== 房主逻辑（创建连接） ====================
-        async function createConnection() {
-            resetAll();
-            isHost = true;
-            updateStatus('🔄 正在生成连接信令...', 'info');
+            // 加入磁力链接开始下载（自动完成P2P连接，无需手动信令）
+            client.add(link, (torrent) => {
+                // 监听下载进度
+                torrent.on('progress', (progress) => {
+                    const percent = Math.floor(progress * 100);
+                    downloadProgress.style.width = `${percent}%`;
+                    updateDownloadStatus(`📥 下载中：${percent}% (连接节点数：${torrent.numPeers})`, 'info');
+                });
 
-            // 创建P2P实例（房主为发起方）
-            peer = new SimplePeer({
-                initiator: true,
-                trickle: true,
-                config: {
-                    iceServers: [
-                        { urls: 'stun:stun.qq.com:3478' },
-                        { urls: 'stun:stun.cloudflare.com:3478' }
-                    ]
-                }
-            });
+                // 下载完成
+                torrent.on('done', () => {
+                    updateDownloadStatus('✅ 下载完成！点击下方链接保存文件', 'success');
+                    downloadProgress.style.width = '100%';
 
-            // 生成信令并自动复制
-            peer.on('signal', async (signal) => {
-                const signalText = JSON.stringify(signal);
-                await copyToClipboard(signalText);
-            });
+                    // 遍历下载的文件，生成下载链接
+                    torrent.files.forEach((file) => {
+                        file.appendTo(fileResult); // 自动生成下载按钮
+                        fileResult.innerHTML += `<br>文件大小：${(file.size / 1024 / 1024).toFixed(2)} MB`;
+                    });
+                });
 
-            // 连接成功
-            peer.on('connect', () => {
-                updateStatus('✅ P2P连接成功！可以传输文件', 'success');
-                signalBox.classList.add('hidden');
-                fileArea.style.display = 'block';
-                sendBtn.disabled = false;
-            });
-
-            // 接收文件
-            peer.on('data', (data) => {
-                try {
-                    const fileData = JSON.parse(data);
-                    const blob = new Blob([Uint8Array.from(fileData.buf)], { type: fileData.type });
-                    const url = URL.createObjectURL(blob);
-                    fileResult.innerHTML = `
-                        ✅ 收到文件：<a href="${url}" download="${fileData.name}" style="color: #007aff; text-decoration: none;">${fileData.name}</a>
-                    `;
-                } catch (e) {
-                    fileResult.innerHTML = '❌ 文件接收失败';
-                }
+                // 节点连接成功
+                torrent.on('peer', () => {
+                    updateDownloadStatus(`🔗 已连接${torrent.numPeers}个节点，开始下载...`, 'info');
+                });
             });
 
             // 错误处理
-            peer.on('error', (err) => {
-                updateStatus(`❌ 连接错误：${err.message}`, 'error');
+            client.on('error', (err) => {
+                updateDownloadStatus(`❌ 下载错误：${err.message}`, 'error');
             });
-        }
-
-        // ==================== 接收方逻辑（加入连接） ====================
-        async function joinConnection() {
-            resetAll();
-            isHost = false;
-            updateStatus('🔄 正在读取信令并建立连接...', 'info');
-
-            // 自动读取剪贴板中的房主信令
-            const hostSignalText = await pasteFromClipboard();
-            if (!hostSignalText) {
-                updateStatus('❌ 未获取到有效信令', 'error');
-                return;
-            }
-
-            try {
-                const hostSignal = JSON.parse(hostSignalText);
-
-                // 创建P2P实例（接收方为被动方）
-                peer = new SimplePeer({
-                    initiator: false,
-                    trickle: true,
-                    config: {
-                        iceServers: [
-                            { urls: 'stun:stun.qq.com:3478' },
-                            { urls: 'stun:stun.cloudflare.com:3478' }
-                        ]
-                    }
-                });
-
-                // 生成回信令并自动复制
-                peer.on('signal', async (signal) => {
-                    const replySignalText = JSON.stringify(signal);
-                    await copyToClipboard(replySignalText);
-                });
-
-                // 导入房主信令
-                peer.signal(hostSignal);
-
-                // 连接成功
-                peer.on('connect', () => {
-                    updateStatus('✅ P2P连接成功！可以传输文件', 'success');
-                    signalBox.classList.add('hidden');
-                    fileArea.style.display = 'block';
-                    sendBtn.disabled = false;
-                });
-
-                // 接收文件
-                peer.on('data', (data) => {
-                    try {
-                        const fileData = JSON.parse(data);
-                        const blob = new Blob([Uint8Array.from(fileData.buf)], { type: fileData.type });
-                        const url = URL.createObjectURL(blob);
-                        fileResult.innerHTML = `
-                            ✅ 收到文件：<a href="${url}" download="${fileData.name}" style="color: #007aff; text-decoration: none;">${fileData.name}</a>
-                        `;
-                    } catch (e) {
-                        fileResult.innerHTML = '❌ 文件接收失败';
-                    }
-                });
-
-                // 错误处理
-                peer.on('error', (err) => {
-                    updateStatus(`❌ 连接错误：${err.message}`, 'error');
-                });
-
-            } catch (e) {
-                updateStatus('❌ 信令格式错误，请重新获取', 'error');
-            }
-        }
-
-        // ==================== 文件传输逻辑 ====================
-        function sendFile() {
-            const file = document.getElementById('fileInput').files[0];
-            if (!file) {
-                updateStatus('⚠️ 请先选择要发送的文件', 'error');
-                return;
-            }
-            if (!peer || !peer.connected) {
-                updateStatus('❌ P2P连接未建立，无法发送文件', 'error');
-                return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const fileData = {
-                    name: file.name,
-                    type: file.type || 'application/octet-stream',
-                    buf: Array.from(new Uint8Array(e.target.result))
-                };
-                peer.send(JSON.stringify(fileData));
-                fileResult.innerHTML = `✅ 已发送：${file.name}`;
-                updateStatus('✅ 文件发送成功', 'success');
-            };
-            reader.readAsArrayBuffer(file);
         }
     </script>
 </body>
