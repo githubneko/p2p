@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>极简P2P文件传输（WebTorrent版）</title>
+    <title>WebTorrent P2P文件传输（修复版）</title>
     <style>
         * {
             margin: 0;
@@ -97,23 +97,16 @@
             background: #ffebee;
             color: #c62828;
         }
-        .progress-bar {
-            height: 8px;
-            background: #e9ecef;
-            border-radius: 4px;
-            margin-bottom: 12px;
-            overflow: hidden;
-        }
-        .progress-fill {
-            height: 100%;
-            background: #007aff;
-            width: 0%;
-            transition: width 0.3s ease;
-        }
-        .file-info {
-            font-size: 14px;
+        .log-box {
+            width: 100%;
+            min-height: 60px;
+            padding: 8px;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            font-size: 12px;
             color: #666;
-            margin-bottom: 8px;
+            margin-top: 8px;
+            font-family: monospace;
         }
         .btn-copy {
             background: #ff9500;
@@ -125,7 +118,7 @@
     </style>
 </head>
 <body>
-    <h1>📤 P2P文件传输（WebTorrent版）</h1>
+    <h1>📤 P2P文件传输（WebTorrent修复版）</h1>
 
     <div class="container">
         <!-- 分享文件区 -->
@@ -140,6 +133,7 @@
 
             <textarea id="magnetLink" readonly placeholder="生成的分享链接会显示在这里..."></textarea>
             <button class="btn-copy" onclick="copyMagnetLink()" disabled>复制链接</button>
+            <div id="shareLog" class="log-box">日志：等待操作...</div>
         </div>
 
         <!-- 下载文件区 -->
@@ -151,29 +145,58 @@
             <div id="downloadStatus" class="status status-info">
                 粘贴链接后点击开始下载
             </div>
-
-            <div class="progress-bar">
-                <div id="downloadProgress" class="progress-fill"></div>
-            </div>
-
-            <div id="fileResult" class="file-info"></div>
+            <div id="fileResult" style="margin-top: 12px; font-size: 14px; color: #666;"></div>
         </div>
     </div>
 
-    <!-- 引入WebTorrent核心库（国内CDN） -->
-    <script src="https://cdn.bootcdn.net/ajax/libs/webtorrent/2.1.34/webtorrent.min.js"></script>
+    <!-- 改用更稳定的CDN + 增加兼容性适配 -->
+    <script src="https://cdn.jsdelivr.net/npm/webtorrent@2.1.34/webtorrent.min.js"></script>
     <script>
-        // 创建WebTorrent客户端（自动连接公共Tracker，无需手动信令）
-        const client = new WebTorrent();
-        
+        // 全局变量
+        let client = null;
+        let currentTorrent = null;
         const fileInput = document.getElementById('fileInput');
         const magnetLink = document.getElementById('magnetLink');
         const shareStatus = document.getElementById('shareStatus');
+        const shareLog = document.getElementById('shareLog');
         const downloadMagnetLink = document.getElementById('downloadMagnetLink');
         const downloadStatus = document.getElementById('downloadStatus');
-        const downloadProgress = document.getElementById('downloadProgress');
         const fileResult = document.getElementById('fileResult');
         const copyBtn = document.getElementById('copyMagnetLink');
+
+        // 初始化WebTorrent客户端（增加容错配置）
+        function initClient() {
+            try {
+                // 销毁旧客户端
+                if (client) client.destroy();
+                
+                // 创建新客户端，配置公共Tracker（国内可用）
+                client = new WebTorrent({
+                    tracker: {
+                        rtcConfig: {
+                            iceServers: [
+                                { urls: 'stun:stun.qq.com:3478' },
+                                { urls: 'stun:stun.cloudflare.com:3478' }
+                            ]
+                        }
+                    },
+                    maxConns: 100
+                });
+
+                // 客户端错误监听
+                client.on('error', (err) => {
+                    logShare(`客户端错误：${err.message}`);
+                    updateShareStatus(`❌ 客户端初始化失败：${err.message}`, 'error');
+                });
+
+                logShare('WebTorrent客户端初始化成功');
+                return true;
+            } catch (e) {
+                logShare(`初始化失败：${e.message}`);
+                updateShareStatus(`❌ WebTorrent加载失败：${e.message}`, 'error');
+                return false;
+            }
+        }
 
         // 更新分享状态
         function updateShareStatus(text, type = 'info') {
@@ -187,36 +210,79 @@
             downloadStatus.className = `status status-${type}`;
         }
 
-        // ==================== 分享文件（生成磁力链接） ====================
-        function shareFile() {
+        // 分享日志
+        function logShare(text) {
+            shareLog.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+            console.log('ShareLog:', text);
+        }
+
+        // ==================== 分享文件（核心修复） ====================
+        async function shareFile() {
+            // 1. 检查文件
             const file = fileInput.files[0];
             if (!file) {
                 updateShareStatus('⚠️ 请先选择要分享的文件', 'error');
+                logShare('未选择文件');
+                return;
+            }
+            logShare(`选择文件：${file.name} (${(file.size/1024/1024).toFixed(2)}MB)`);
+
+            // 2. 初始化客户端
+            if (!initClient()) {
                 return;
             }
 
+            // 3. 重置状态
+            magnetLink.value = '';
+            copyBtn.disabled = true;
             updateShareStatus('🔄 正在生成分享链接...', 'info');
 
-            // 用WebTorrent创建种子并生成磁力链接
-            client.seed(file, (torrent) => {
-                // 生成磁力链接（核心：无需手动信令，直接分享这个链接即可）
-                const link = torrent.magnetURI;
-                magnetLink.value = link;
-                copyBtn.disabled = false;
-                
-                updateShareStatus(`✅ 链接生成成功！文件：${file.name}`, 'success');
-                fileResult.textContent = `分享中：${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-            });
+            try {
+                // 4. 生成种子和磁力链接（核心修复：增加错误捕获）
+                logShare('开始生成种子文件...');
+                currentTorrent = client.seed(file, {
+                    name: file.name,
+                    pieceLength: 16384 // 适配小文件
+                }, (torrent) => {
+                    // 生成成功回调
+                    const link = torrent.magnetURI;
+                    magnetLink.value = link;
+                    copyBtn.disabled = false;
+                    
+                    logShare(`链接生成成功：${link.substring(0, 50)}...`);
+                    updateShareStatus(`✅ 链接生成成功！文件：${file.name}`, 'success');
+                    
+                    // 监听种子状态
+                    torrent.on('warning', (warn) => logShare(`警告：${warn.message}`));
+                    torrent.on('error', (err) => logShare(`种子错误：${err.message}`));
+                });
+
+                // 5. 监听种子创建过程
+                currentTorrent.on('error', (err) => {
+                    logShare(`种子创建失败：${err.message}`);
+                    updateShareStatus(`❌ 生成链接失败：${err.message}`, 'error');
+                });
+
+            } catch (e) {
+                logShare(`分享失败：${e.message}`);
+                updateShareStatus(`❌ 生成链接异常：${e.message}`, 'error');
+            }
         }
 
         // 复制磁力链接
         function copyMagnetLink() {
-            magnetLink.select();
-            document.execCommand('copy');
-            updateShareStatus('✅ 链接已复制到剪贴板，发给对方即可', 'success');
+            try {
+                magnetLink.select();
+                document.execCommand('copy');
+                updateShareStatus('✅ 链接已复制到剪贴板', 'success');
+                logShare('链接复制成功');
+            } catch (e) {
+                updateShareStatus('⚠️ 复制失败，请手动复制', 'error');
+                logShare(`复制失败：${e.message}`);
+            }
         }
 
-        // ==================== 下载文件（粘贴磁力链接） ====================
+        // ==================== 下载文件 ====================
         function downloadFile() {
             const link = downloadMagnetLink.value.trim();
             if (!link) {
@@ -224,43 +290,68 @@
                 return;
             }
 
-            // 清空之前的下载状态
-            downloadProgress.style.width = '0%';
-            fileResult.textContent = '';
+            // 初始化客户端
+            if (!initClient()) {
+                return;
+            }
+
+            // 重置状态
+            fileResult.innerHTML = '';
             updateDownloadStatus('🔄 正在连接节点并开始下载...', 'info');
 
-            // 加入磁力链接开始下载（自动完成P2P连接，无需手动信令）
-            client.add(link, (torrent) => {
-                // 监听下载进度
-                torrent.on('progress', (progress) => {
-                    const percent = Math.floor(progress * 100);
-                    downloadProgress.style.width = `${percent}%`;
-                    updateDownloadStatus(`📥 下载中：${percent}% (连接节点数：${torrent.numPeers})`, 'info');
-                });
+            try {
+                // 加入磁力链接
+                client.add(link, (torrent) => {
+                    logShare(`开始下载：${torrent.name}`);
+                    updateDownloadStatus(`🔗 已连接到${torrent.numPeers}个节点`, 'info');
 
-                // 下载完成
-                torrent.on('done', () => {
-                    updateDownloadStatus('✅ 下载完成！点击下方链接保存文件', 'success');
-                    downloadProgress.style.width = '100%';
+                    // 下载进度
+                    torrent.on('progress', (progress) => {
+                        const percent = Math.floor(progress * 100);
+                        updateDownloadStatus(`📥 下载中：${percent}%`, 'info');
+                        fileResult.innerHTML = `
+                            <div>文件名：${torrent.name}</div>
+                            <div>进度：${percent}%</div>
+                            <div>已连接节点：${torrent.numPeers}个</div>
+                        `;
+                    });
 
-                    // 遍历下载的文件，生成下载链接
-                    torrent.files.forEach((file) => {
-                        file.appendTo(fileResult); // 自动生成下载按钮
-                        fileResult.innerHTML += `<br>文件大小：${(file.size / 1024 / 1024).toFixed(2)} MB`;
+                    // 下载完成
+                    torrent.on('done', () => {
+                        updateDownloadStatus('✅ 下载完成！点击下方链接保存', 'success');
+                        fileResult.innerHTML = `<div>✅ 下载完成：${torrent.name}</div>`;
+                        
+                        // 生成下载链接
+                        torrent.files.forEach((file) => {
+                            const a = document.createElement('a');
+                            a.href = URL.createObjectURL(file);
+                            a.download = file.name;
+                            a.textContent = `下载 ${file.name}`;
+                            a.style.display = 'block';
+                            a.style.margin = '8px 0';
+                            a.style.color = '#007aff';
+                            fileResult.appendChild(a);
+                        });
+                    });
+
+                    // 节点连接
+                    torrent.on('peer', (peer) => {
+                        updateDownloadStatus(`🔗 已连接${torrent.numPeers}个节点，开始下载...`, 'info');
+                        logShare(`新节点连接：${peer.id}`);
                     });
                 });
 
-                // 节点连接成功
-                torrent.on('peer', () => {
-                    updateDownloadStatus(`🔗 已连接${torrent.numPeers}个节点，开始下载...`, 'info');
-                });
-            });
-
-            // 错误处理
-            client.on('error', (err) => {
-                updateDownloadStatus(`❌ 下载错误：${err.message}`, 'error');
-            });
+            } catch (e) {
+                updateDownloadStatus(`❌ 下载失败：${e.message}`, 'error');
+                logShare(`下载错误：${e.message}`);
+            }
         }
+
+        // 页面加载时初始化
+        window.onload = () => {
+            logShare('页面加载完成，等待选择文件...');
+            updateShareStatus('已就绪，选择文件开始分享', 'info');
+        };
     </script>
 </body>
 </html>
