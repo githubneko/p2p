@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>从原理出发的P2P文件传输</title>
+    <title>增强版P2P文件传输</title>
     <style>
-        body { max-width: 600px; margin: 20px auto; padding: 20px; font-family: Arial, sans-serif; background: #f5f5f5; }
+        body { max-width: 700px; margin: 20px auto; padding: 20px; font-family: Arial, sans-serif; background: #f5f5f5; }
         .box { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         h2 { margin-top: 0; color: #333; font-size: 18px; }
         button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin: 5px 0; }
@@ -17,12 +17,21 @@
         .err { background: #f8d7da; color: #721c24; }
         .info { background: #d1ecf1; color: #0c5460; }
         input[type="file"] { margin: 10px 0; }
-        a { display: block; margin-top: 10px; padding: 10px; background: #28a745; color: white; text-align: center; text-decoration: none; border-radius: 5px; }
+        .progress-container { margin: 15px 0; }
+        .progress-bar { height: 25px; background: #e9ecef; border-radius: 5px; overflow: hidden; position: relative; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #007bff, #28a745); width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 12px; }
+        .file-list { margin: 10px 0; padding: 10px; background: #f8f9fa; border-radius: 5px; }
+        .file-item { padding: 8px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+        .file-item:last-child { border-bottom: none; }
+        .file-name { font-weight: 500; }
+        .file-size { color: #666; font-size: 12px; }
+        .download-link { display: block; margin-top: 10px; padding: 12px; background: #28a745; color: white; text-align: center; text-decoration: none; border-radius: 5px; font-weight: bold; }
+        .download-link:hover { background: #218838; }
     </style>
 </head>
 <body>
 
-    <h1>🔧 从原理出发的P2P文件传输</h1>
+    <h1>🚀 增强版P2P文件传输</h1>
 
     <!-- ========================================== -->
     <!-- 第一步：房主（发起连接的人） -->
@@ -31,8 +40,9 @@
         <h2>📤 第一步：我是房主（发起连接）</h2>
         <div id="host-status" class="status info">等待操作...</div>
         
-        <!-- 1. 选择要发送的文件 -->
-        <input type="file" id="host-file">
+        <!-- 1. 选择要发送的文件（支持多文件） -->
+        <input type="file" id="host-file" multiple>
+        <div id="host-file-list" class="file-list" style="display: none;"></div>
         
         <!-- 2. 点击生成“我的名片” (Offer) -->
         <button id="host-create-offer" disabled>1. 生成我的连接名片 (Offer)</button>
@@ -72,7 +82,21 @@
     <div class="box">
         <h2>📁 第三步：文件传输</h2>
         <div id="transfer-status" class="status info">等待连接建立...</div>
-        <div id="file-result"></div>
+        
+        <!-- 进度条 -->
+        <div class="progress-container" id="progress-container" style="display: none;">
+            <div id="current-file-name" style="margin-bottom: 5px; font-weight: 500;"></div>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill">0%</div>
+            </div>
+            <div id="progress-text" style="margin-top: 5px; font-size: 13px; color: #666;"></div>
+        </div>
+
+        <!-- 接收的文件列表 -->
+        <div id="received-files" class="file-list" style="display: none;">
+            <h3 style="margin-top: 0; margin-bottom: 10px;">📦 已接收的文件：</h3>
+            <div id="files-container"></div>
+        </div>
     </div>
 
     <script>
@@ -80,8 +104,6 @@
         // 0. 全局配置与变量
         // ==========================================
         
-        // STUN服务器：用于帮两台设备“穿透”网络，找到对方
-        // 这里用了腾讯和Cloudflare的公共服务器，国内稳定
         const CONFIG = {
             iceServers: [
                 { urls: 'stun:stun.qq.com:3478' },
@@ -89,18 +111,18 @@
             ]
         };
 
-        // 全局变量
-        let hostPeer = null;    // 房主的P2P连接对象
-        let clientPeer = null;  // 接收方的P2P连接对象
-        let fileToSend = null;  // 房主选择的要发送的文件
-        let hostChannel = null; // 房主的数据传输通道
+        let hostPeer = null;
+        let clientPeer = null;
+        let filesToSend = [];
+        let hostChannel = null;
+        let receivedFiles = [];
 
-        // DOM元素快捷引用
         const dom = {
             hostStatus: document.getElementById('host-status'),
             clientStatus: document.getElementById('client-status'),
             transferStatus: document.getElementById('transfer-status'),
             hostFile: document.getElementById('host-file'),
+            hostFileList: document.getElementById('host-file-list'),
             hostCreateOffer: document.getElementById('host-create-offer'),
             hostOffer: document.getElementById('host-offer'),
             hostCopyOffer: document.getElementById('host-copy-offer'),
@@ -110,11 +132,16 @@
             clientCreateAnswer: document.getElementById('client-create-answer'),
             clientAnswer: document.getElementById('client-answer'),
             clientCopyAnswer: document.getElementById('client-copy-answer'),
-            fileResult: document.getElementById('file-result')
+            progressContainer: document.getElementById('progress-container'),
+            progressFill: document.getElementById('progress-fill'),
+            progressText: document.getElementById('progress-text'),
+            currentFileName: document.getElementById('current-file-name'),
+            receivedFiles: document.getElementById('received-files'),
+            filesContainer: document.getElementById('files-container')
         };
 
         // ==========================================
-        // 辅助函数：更新状态
+        // 辅助函数
         // ==========================================
         function setStatus(element, text, type = 'info') {
             element.textContent = text;
@@ -122,46 +149,65 @@
             console.log(`[${type.toUpperCase()}]`, text);
         }
 
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function updateProgress(percent, fileName, sent, total) {
+            dom.progressContainer.style.display = 'block';
+            dom.currentFileName.textContent = `📄 当前文件：${fileName}`;
+            dom.progressFill.style.width = `${percent}%`;
+            dom.progressFill.textContent = `${percent}%`;
+            dom.progressText.textContent = `已传输：${formatSize(sent)} / ${formatSize(total)}`;
+        }
+
         // ==========================================
         // 第一步：房主逻辑
         // ==========================================
 
-        // 1.1 房主选择文件
         dom.hostFile.addEventListener('change', (e) => {
-            fileToSend = e.target.files[0];
-            if (fileToSend) {
-                setStatus(dom.hostStatus, `已选择文件：${fileToSend.name} (${(fileToSend.size/1024/1024).toFixed(2)}MB)`, 'ok');
+            filesToSend = Array.from(e.target.files);
+            if (filesToSend.length > 0) {
+                let html = '<h3 style="margin-top: 0; margin-bottom: 10px;">📦 已选择的文件：</h3>';
+                let totalSize = 0;
+                filesToSend.forEach((file, index) => {
+                    html += `
+                        <div class="file-item">
+                            <span class="file-name">${index + 1}. ${file.name}</span>
+                            <span class="file-size">${formatSize(file.size)}</span>
+                        </div>
+                    `;
+                    totalSize += file.size;
+                });
+                dom.hostFileList.innerHTML = html;
+                dom.hostFileList.style.display = 'block';
+                setStatus(dom.hostStatus, `已选择 ${filesToSend.length} 个文件，共 ${formatSize(totalSize)}`, 'ok');
                 dom.hostCreateOffer.disabled = false;
             }
         });
 
-        // 1.2 房主点击：生成 Offer（我的名片）
         dom.hostCreateOffer.addEventListener('click', async () => {
             setStatus(dom.hostStatus, '正在创建P2P连接并生成名片...', 'info');
 
-            // 1. 创建房主的 RTCPeerConnection 对象
             hostPeer = new RTCPeerConnection(CONFIG);
-
-            // 2. 创建数据传输通道（用于传文件）
             hostChannel = hostPeer.createDataChannel('fileTransfer');
             
-            // 3. 监听通道状态
             hostChannel.onopen = () => {
                 setStatus(dom.transferStatus, '✅ P2P连接已建立！准备发送文件...', 'ok');
-                // 连接建立后，直接开始发送文件
-                sendFile();
+                sendFiles();
             };
             
             hostChannel.onclose = () => {
                 setStatus(dom.transferStatus, '连接已关闭', 'info');
             };
 
-            // 4. 生成 Offer (SDP: 会话描述协议，也就是“我的网络名片”)
             const offer = await hostPeer.createOffer();
             await hostPeer.setLocalDescription(offer);
 
-            // 5. 等待 ICE 候选收集完成（简单处理：等1秒后直接显示）
-            // ICE候选：就是“我有哪些网络地址可以连”
             setTimeout(() => {
                 dom.hostOffer.value = JSON.stringify(hostPeer.localDescription);
                 dom.hostCopyOffer.disabled = false;
@@ -170,14 +216,12 @@
             }, 1000);
         });
 
-        // 1.3 复制房主名片
         dom.hostCopyOffer.addEventListener('click', () => {
             dom.hostOffer.select();
             document.execCommand('copy');
             setStatus(dom.hostStatus, '✅ 房主名片已复制到剪贴板', 'ok');
         });
 
-        // 1.4 房主粘贴 Answer 并连接
         dom.hostConnect.addEventListener('click', async () => {
             const answerStr = dom.hostAnswer.value.trim();
             if (!answerStr) {
@@ -187,7 +231,6 @@
 
             try {
                 const answer = JSON.parse(answerStr);
-                // 设置远程描述（也就是“接收方的名片”）
                 await hostPeer.setRemoteDescription(new RTCSessionDescription(answer));
                 setStatus(dom.hostStatus, '✅ 已接收对方名片，等待连接建立...', 'ok');
             } catch (e) {
@@ -196,17 +239,85 @@
         });
 
         // ==========================================
+        // 发送多文件逻辑
+        // ==========================================
+        async function sendFiles() {
+            if (filesToSend.length === 0 || !hostChannel) return;
+
+            try {
+                // 1. 先发送文件数量
+                hostChannel.send(JSON.stringify({
+                    type: 'file-count',
+                    count: filesToSend.length
+                }));
+
+                // 2. 逐个发送文件
+                for (let fileIndex = 0; fileIndex < filesToSend.length; fileIndex++) {
+                    const file = filesToSend[fileIndex];
+                    setStatus(dom.transferStatus, `📤 正在发送 (${fileIndex + 1}/${filesToSend.length})：${file.name}`, 'info');
+
+                    // 读取文件
+                    const arrayBuffer = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.readAsArrayBuffer(file);
+                    });
+
+                    // 发送文件信息
+                    hostChannel.send(JSON.stringify({
+                        type: 'file-info',
+                        name: file.name,
+                        size: file.size,
+                        type: file.type
+                    }));
+
+                    // 分块发送文件数据
+                    const chunkSize = 16384;
+                    let offset = 0;
+                    let totalSent = 0;
+
+                    while (offset < arrayBuffer.byteLength) {
+                        const chunk = arrayBuffer.slice(offset, offset + chunkSize);
+                        hostChannel.send(chunk);
+                        offset += chunk.byteLength;
+                        totalSent += chunk.byteLength;
+
+                        // 更新进度
+                        const percent = Math.round((totalSent / arrayBuffer.byteLength) * 100);
+                        updateProgress(percent, file.name, totalSent, arrayBuffer.byteLength);
+
+                        // 防止缓冲区溢出
+                        if (hostChannel.bufferedAmount > 65535) {
+                            await new Promise(resolve => {
+                                hostChannel.onbufferedamountlow = resolve;
+                            });
+                        }
+                    }
+
+                    // 发送文件完成标记
+                    hostChannel.send(JSON.stringify({ type: 'file-end' }));
+                }
+
+                // 所有文件发送完成
+                hostChannel.send(JSON.stringify({ type: 'transfer-complete' }));
+                setStatus(dom.transferStatus, `✅ 所有文件发送完成！共 ${filesToSend.length} 个`, 'ok');
+                updateProgress(100, '传输完成', 0, 0);
+
+            } catch (e) {
+                setStatus(dom.transferStatus, '❌ 发送失败：' + e.message, 'err');
+            }
+        }
+
+        // ==========================================
         // 第二步：接收方逻辑
         // ==========================================
 
-        // 2.1 接收方粘贴 Offer 后，激活按钮
         dom.clientOffer.addEventListener('input', () => {
             if (dom.clientOffer.value.trim()) {
                 dom.clientCreateAnswer.disabled = false;
             }
         });
 
-        // 2.2 接收方点击：生成 Answer（我的名片）
         dom.clientCreateAnswer.addEventListener('click', async () => {
             const offerStr = dom.clientOffer.value.trim();
             if (!offerStr) {
@@ -218,45 +329,78 @@
 
             try {
                 const offer = JSON.parse(offerStr);
-
-                // 1. 创建接收方的 RTCPeerConnection 对象
                 clientPeer = new RTCPeerConnection(CONFIG);
 
-                // 2. 监听数据通道（等待房主建立通道）
+                let currentFileInfo = null;
+                let receivedChunks = [];
+                let totalReceived = 0;
+                let fileCount = 0;
+                let receivedFileCount = 0;
+
                 clientPeer.ondatachannel = (event) => {
                     const receiveChannel = event.channel;
                     setStatus(dom.transferStatus, '✅ P2P连接已建立！准备接收文件...', 'ok');
-                    
-                    // 接收文件数据
-                    let receivedBuffer = [];
-                    receiveChannel.onmessage = (e) => {
-                        // 如果收到的是字符串 "done"，表示传输结束
-                        if (e.data === 'done') {
-                            // 把所有收到的数据块拼起来
-                            const blob = new Blob(receivedBuffer);
-                            const url = URL.createObjectURL(blob);
+                    dom.receivedFiles.style.display = 'block';
+
+                    receiveChannel.onmessage = async (e) => {
+                        if (typeof e.data === 'string') {
+                            const message = JSON.parse(e.data);
                             
-                            // 显示下载链接
-                            dom.fileResult.innerHTML = `
-                                <p style="font-weight:bold;">✅ 文件接收完成！</p>
-                                <a href="${url}" download="received_file">点击下载文件</a>
-                            `;
-                            setStatus(dom.transferStatus, '✅ 文件传输成功！', 'ok');
-                            return;
+                            switch (message.type) {
+                                case 'file-count':
+                                    fileCount = message.count;
+                                    setStatus(dom.transferStatus, `📥 准备接收 ${fileCount} 个文件...`, 'info');
+                                    break;
+                                    
+                                case 'file-info':
+                                    currentFileInfo = message;
+                                    receivedChunks = [];
+                                    totalReceived = 0;
+                                    receivedFileCount++;
+                                    setStatus(dom.transferStatus, `📥 正在接收 (${receivedFileCount}/${fileCount})：${currentFileInfo.name}`, 'info');
+                                    break;
+                                    
+                                case 'file-end':
+                                    // 组装文件
+                                    const blob = new Blob(receivedChunks, { type: currentFileInfo.type });
+                                    const url = URL.createObjectURL(blob);
+                                    
+                                    // 添加到已接收文件列表
+                                    const fileHtml = `
+                                        <div class="file-item">
+                                            <span class="file-name">${receivedFileCount}. ${currentFileInfo.name}</span>
+                                            <span class="file-size">${formatSize(currentFileInfo.size)}</span>
+                                        </div>
+                                        <a href="${url}" download="${currentFileInfo.name}" class="download-link">💾 下载 ${currentFileInfo.name}</a>
+                                    `;
+                                    dom.filesContainer.innerHTML += fileHtml;
+                                    
+                                    // 重置进度
+                                    updateProgress(100, currentFileInfo.name, currentFileInfo.size, currentFileInfo.size);
+                                    break;
+                                    
+                                case 'transfer-complete':
+                                    setStatus(dom.transferStatus, `✅ 所有文件接收完成！共 ${receivedFileCount} 个`, 'ok');
+                                    updateProgress(100, '传输完成', 0, 0);
+                                    break;
+                            }
+                        } else {
+                            // 接收数据块
+                            receivedChunks.push(e.data);
+                            totalReceived += e.data.byteLength;
+                            
+                            if (currentFileInfo) {
+                                const percent = Math.round((totalReceived / currentFileInfo.size) * 100);
+                                updateProgress(percent, currentFileInfo.name, totalReceived, currentFileInfo.size);
+                            }
                         }
-                        // 否则，把数据块存起来
-                        receivedBuffer.push(e.data);
                     };
                 };
 
-                // 3. 设置远程描述（房主的名片）
                 await clientPeer.setRemoteDescription(new RTCSessionDescription(offer));
-
-                // 4. 生成 Answer（我的名片）
                 const answer = await clientPeer.createAnswer();
                 await clientPeer.setLocalDescription(answer);
 
-                // 5. 等待 ICE 候选收集
                 setTimeout(() => {
                     dom.clientAnswer.value = JSON.stringify(clientPeer.localDescription);
                     dom.clientCopyAnswer.disabled = false;
@@ -268,57 +412,12 @@
             }
         });
 
-        // 2.3 复制接收方名片
         dom.clientCopyAnswer.addEventListener('click', () => {
             dom.clientAnswer.select();
             document.execCommand('copy');
             setStatus(dom.clientStatus, '✅ 我的名片已复制到剪贴板', 'ok');
         });
 
-        // ==========================================
-        // 第三步：发送文件逻辑
-        // ==========================================
-        function sendFile() {
-            if (!fileToSend || !hostChannel) return;
-
-            setStatus(dom.transferStatus, `📤 正在发送文件：${fileToSend.name}...`, 'info');
-
-            const reader = new FileReader();
-            
-            // 把文件读取为 ArrayBuffer
-            reader.onload = (e) => {
-                const buffer = e.target.result;
-                const chunkSize = 16384; // 每次发送 16KB (WebRTC推荐的块大小)
-                let offset = 0;
-
-                // 分块发送函数
-                function sendNextChunk() {
-                    while (offset < buffer.byteLength) {
-                        const chunk = buffer.slice(offset, offset + chunkSize);
-                        offset += chunk.byteLength;
-                        
-                        // 发送数据块
-                        hostChannel.send(chunk);
-
-                        // 如果缓冲区满了，等待 drain 事件（防止内存溢出）
-                        if (hostChannel.bufferedAmount > 65535) {
-                            hostChannel.onbufferedamountlow = sendNextChunk;
-                            return;
-                        }
-                    }
-                    // 全部发完后，发送一个 "done" 信号
-                    hostChannel.send('done');
-                    setStatus(dom.transferStatus, '✅ 文件发送完毕！', 'ok');
-                }
-
-                // 开始发送
-                sendNextChunk();
-            };
-
-            reader.readAsArrayBuffer(fileToSend);
-        }
-
-        // 页面加载完成提示
         setStatus(dom.hostStatus, '页面就绪，请选择文件开始', 'info');
         setStatus(dom.clientStatus, '页面就绪，等待房主名片', 'info');
 
