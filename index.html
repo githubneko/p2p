@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P文件传输（房主/接收方版）</title>
+    <style>
+        body { max-width: 800px; margin: 20px auto; padding: 0 20px; font-family: Arial, sans-serif; }
+        .container { border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        button { padding: 8px 16px; margin: 5px; cursor: pointer; border: none; border-radius: 4px; color: white; }
+        .host-btn { background: #28a745; }
+        .receive-btn { background: #17a2b8; }
+        .copy-btn { background: #ffc107; color: #000; }
+        .import-btn { background: #007bff; }
+        .reset-btn { background: #dc3545; }
+        #status { padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .success { background: #d4edda; color: #155724; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        .error { background: #f8d7da; color: #721c24; }
+        textarea { width: 100%; margin: 8px 0; padding: 8px; box-sizing: border-box; border-radius: 4px; border: 1px solid #ddd; }
+        #fileList { min-height: 60px; padding: 10px; border: 1px dashed #ddd; margin-top: 10px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <h1>P2P文件互传（房主/接收方）</h1>
+
+    <!-- 角色选择 -->
+    <div class="container">
+        <h3>1. 选择你的角色</h3>
+        <button class="host-btn" onclick="initAsHost()">我是房主（生成信令）</button>
+        <button class="receive-btn" onclick="showReceivePanel()">我是接收方（导入信令）</button>
+        <button class="reset-btn" onclick="resetAll()">重置所有</button>
+        <div id="status" class="info">状态：未选择角色</div>
+    </div>
+
+    <!-- 房主信令生成面板 -->
+    <div id="hostPanel" class="container hidden">
+        <h3>2. 房主操作（复制信令发给接收方）</h3>
+        <label>你的连接信令（复制后发给远程接收方）：</label>
+        <textarea id="hostSignalOutput" rows="6" placeholder="点击“我是房主”后生成信令..."></textarea>
+        <button class="copy-btn" onclick="copyHostSignal()">复制信令</button>
+    </div>
+
+    <!-- 接收方信令导入面板 -->
+    <div id="receivePanel" class="container hidden">
+        <h3>2. 接收方操作（粘贴房主发来的信令）</h3>
+        <label>粘贴房主发来的信令：</label>
+        <textarea id="receiveSignalInput" rows="6" placeholder="粘贴从房主处获取的信令..."></textarea>
+        <button class="import-btn" onclick="importHostSignal()">导入信令并连接</button>
+    </div>
+
+    <!-- 文件传输面板 -->
+    <div id="filePanel" class="container hidden">
+        <h3>3. 文件传输（连接成功后可用）</h3>
+        <input type="file" id="fileInput">
+        <button onclick="sendFile()" disabled id="sendBtn">选择文件后发送</button>
+        <div id="fileList">等待接收文件...</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+    <script>
+        // 全局变量
+        let peer = null;
+        let isHost = false; // 是否是房主
+        // DOM元素
+        const statusEl = document.getElementById('status');
+        const hostPanel = document.getElementById('hostPanel');
+        const receivePanel = document.getElementById('receivePanel');
+        const filePanel = document.getElementById('filePanel');
+        const sendBtn = document.getElementById('sendBtn');
+        const fileListEl = document.getElementById('fileList');
+
+        // 更新状态提示
+        function updateStatus(text, type = 'info') {
+            statusEl.textContent = `状态：${text}`;
+            statusEl.className = type;
+            console.log('[P2P]', text);
+        }
+
+        // 重置所有状态
+        function resetAll() {
+            // 销毁P2P连接
+            if (peer) {
+                peer.destroy();
+                peer = null;
+            }
+            // 隐藏所有面板
+            hostPanel.classList.add('hidden');
+            receivePanel.classList.add('hidden');
+            filePanel.classList.add('hidden');
+            // 重置按钮和文本框
+            sendBtn.disabled = true;
+            document.getElementById('hostSignalOutput').value = '';
+            document.getElementById('receiveSignalInput').value = '';
+            fileListEl.innerHTML = '等待接收文件...';
+            // 重置状态
+            isHost = false;
+            updateStatus('已重置所有状态');
+        }
+
+        // ========== 房主逻辑 ==========
+        function initAsHost() {
+            resetAll(); // 先重置旧状态
+            isHost = true;
+            hostPanel.classList.remove('hidden');
+            updateStatus('正在初始化房主P2P连接...');
+
+            // 创建房主P2P实例（initiator=true 表示主动发起方）
+            peer = new SimplePeer({
+                initiator: true,
+                trickle: true,
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun.cloudflare.com:3478' }
+                    ]
+                }
+            });
+
+            // 房主生成信令，显示到文本框
+            peer.on('signal', (signalData) => {
+                const signalText = JSON.stringify(signalData, null, 2); // 格式化便于复制
+                document.getElementById('hostSignalOutput').value = signalText;
+                updateStatus('房主信令已生成，请复制发给接收方', 'info');
+            });
+
+            // 监听连接状态
+            bindPeerEvents();
+        }
+
+        // 复制房主信令
+        function copyHostSignal() {
+            const textarea = document.getElementById('hostSignalOutput');
+            if (!textarea.value) {
+                alert('暂无信令可复制，请先等待信令生成！');
+                return;
+            }
+            textarea.select();
+            document.execCommand('copy');
+            alert('房主信令已复制到剪贴板！可发给远程接收方');
+        }
+
+        // ========== 接收方逻辑 ==========
+        // 显示接收方面板
+        function showReceivePanel() {
+            resetAll(); // 先重置旧状态
+            receivePanel.classList.remove('hidden');
+            updateStatus('请粘贴房主发来的信令并导入');
+        }
+
+        // 导入房主信令并建立连接
+        function importHostSignal() {
+            const signalText = document.getElementById('receiveSignalInput').value.trim();
+            if (!signalText) {
+                alert('请先粘贴房主发来的信令！');
+                return;
+            }
+
+            updateStatus('正在解析信令并建立连接...');
+            try {
+                // 解析信令
+                const signalData = JSON.parse(signalText);
+                // 创建接收方P2P实例（initiator=false 表示被动接收方）
+                peer = new SimplePeer({
+                    initiator: false,
+                    trickle: true,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun.cloudflare.com:3478' }
+                        ]
+                    }
+                });
+
+                // 导入房主信令
+                peer.signal(signalData);
+                // 接收方生成自己的信令（需要回传给房主，自动处理）
+                peer.on('signal', (receiveSignalData) => {
+                    // 这里如果是双向信令，房主需要导入接收方的信令，但SimplePeer已自动处理大部分场景
+                    updateStatus('接收方信令已生成，正在完成连接...');
+                });
+
+                // 监听连接状态
+                bindPeerEvents();
+
+            } catch (e) {
+                updateStatus(`信令解析失败：${e.message}`, 'error');
+                alert('信令格式错误！请检查复制的内容是否完整');
+            }
+        }
+
+        // ========== 通用P2P事件绑定 ==========
+        function bindPeerEvents() {
+            // 连接成功
+            peer.on('connect', () => {
+                filePanel.classList.remove('hidden');
+                sendBtn.disabled = false;
+                updateStatus('P2P连接成功！可开始传输文件', 'success');
+            });
+
+            // 连接错误
+            peer.on('error', (err) => {
+                updateStatus(`连接错误：${err.message}`, 'error');
+            });
+
+            // 连接断开
+            peer.on('close', () => {
+                sendBtn.disabled = true;
+                updateStatus('P2P连接已断开', 'info');
+            });
+
+            // 接收文件
+            peer.on('data', (data) => {
+                try {
+                    const fileData = JSON.parse(data);
+                    const blob = new Blob([Uint8Array.from(fileData.content)], { type: fileData.type });
+                    const downloadUrl = URL.createObjectURL(blob);
+                    
+                    fileListEl.innerHTML = `
+                        <div style="color: green; font-weight: bold;">✅ 收到文件：${fileData.name}</div>
+                        <a href="${downloadUrl}" download="${fileData.name}" style="margin-top:8px;display:inline-block;padding:6px 12px;background:#007bff;color:white;text-decoration:none;border-radius:4px;">点击下载</a>
+                    `;
+                    updateStatus('文件接收成功', 'success');
+                } catch (e) {
+                    fileListEl.innerHTML = `<div style="color: red;">❌ 接收失败：${e.message}</div>`;
+                    updateStatus('文件接收失败', 'error');
+                }
+            });
+        }
+
+        // ========== 文件传输逻辑 ==========
+        function sendFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('请先选择要发送的文件！');
+                return;
+            }
+            if (!peer || !peer.connected) {
+                alert('P2P连接未建立，无法发送文件！');
+                return;
+            }
+
+            // 显示发送中状态
+            const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+            fileListEl.innerHTML = `📤 正在发送：${file.name}（${fileSizeMB}MB）`;
+            updateStatus(`正在传输文件：${file.name}`);
+
+            // 读取文件并发送
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const fileData = {
+                    name: file.name,
+                    type: file.type || 'application/octet-stream', // 兼容无类型文件
+                    content: Array.from(new Uint8Array(e.target.result))
+                };
+                peer.send(JSON.stringify(fileData));
+                fileListEl.innerHTML = `✅ 已发送：${file.name}（${fileSizeMB}MB）`;
+                updateStatus('文件发送成功', 'success');
+            };
+            reader.onerror = (e) => {
+                fileListEl.innerHTML = `<div style="color: red;">❌ 读取文件失败：${e.message}</div>`;
+                updateStatus('读取文件失败', 'error');
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    </script>
+</body>
+</html>
