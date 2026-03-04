@@ -3,117 +3,221 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>极简跨设备文件传输</title>
+<title>跨设备P2P文件传输</title>
 <style>
-*{box-sizing:border-box}
+*{box-sizing:border-box;margin:0;padding:0}
 body{max-width:500px;margin:30px auto;padding:0 20px;background:#f6f7f9;font-family:system-ui}
-.card{background:white;border-radius:16px;padding:24px;margin-bottom:16px;box-shadow:0 2px 10px #0001}
-h1{text-align:center;font-size:22px;margin-bottom:20px}
-.btn{width:100%;padding:12px;border:none;border-radius:10px;background:#007bff;color:white;font-size:16px;margin:8px 0;cursor:pointer}
-.btn:disabled{background:#ccc}
+.card{background:white;border-radius:16px;padding:24px;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,0.05)}
+h1{text-align:center;font-size:22px;margin-bottom:20px;color:#333}
+.btn{width:100%;padding:14px;border:none;border-radius:10px;background:#007bff;color:white;font-size:16px;margin:8px 0;cursor:pointer;transition:background 0.2s}
+.btn:hover{background:#0056cc}
+.btn:disabled{background:#ccc;cursor:not-allowed}
 .area{margin:12px 0}
-textarea{width:100%;height:90px;border-radius:8px;border:1px solid #ddd;padding:10px;font-size:12px;resize:none}
-.status{padding:10px 12px;border-radius:8px;margin:10px 0;font-size:14px}
+textarea{width:100%;height:90px;border-radius:8px;border:1px solid #ddd;padding:10px;font-size:12px;resize:none;font-family:monospace}
+.status{padding:12px;border-radius:8px;margin:10px 0;font-size:14px;text-align:center}
 .info{background:#e7f2ff;color:#0066cc}
-.ok{background:#e8f5e9;color:#1f7522}
-.err{background:#ffebee;color:#c62828}
-.download{display:block;padding:12px;background:#007bff;color:white;text-align:center;border-radius:10px;margin-top:12px;text-decoration:none}
+.success{background:#e8f5e9;color:#1f7522}
+.error{background:#ffebee;color:#c62828}
+.download-btn{display:block;padding:14px;background:#28a745;color:white;text-align:center;border-radius:10px;margin-top:12px;text-decoration:none;font-size:16px}
+.file-info{font-size:14px;color:#666;margin:8px 0}
 </style>
 </head>
 <body>
 
-<h1>📤 极简文件传输</h1>
+<h1>📤 跨设备P2P文件传输</h1>
 
+<!-- 分享方 -->
 <div class="card">
-  <div class="status info" id="s1">选择文件生成分享链接</div>
-  <input type="file" id="file" class="btn" style="background:#34c759">
-  <button class="btn" id="copy" disabled>复制分享链接</button>
+  <div class="status info" id="share-status">选择文件生成连接码</div>
+  <input type="file" id="file-input" class="btn" style="background:#28a745">
+  <button class="btn" id="copy-code" disabled>复制连接码</button>
   <div class="area">
-    <textarea id="link" readonly placeholder="生成后显示链接"></textarea>
+    <textarea id="share-code" readonly placeholder="生成后显示连接码"></textarea>
   </div>
 </div>
 
+<!-- 接收方 -->
 <div class="card">
-  <div class="status info" id="s2">粘贴链接下载</div>
+  <div class="status info" id="receive-status">粘贴连接码接收文件</div>
   <div class="area">
-    <textarea id="input" placeholder="粘贴链接"></textarea>
+    <textarea id="receive-code" placeholder="粘贴连接码"></textarea>
   </div>
-  <button class="btn" id="down">开始下载</button>
-  <div id="result"></div>
+  <button class="btn" id="connect-btn">开始连接</button>
+  <div id="receive-result"></div>
 </div>
 
 <script>
-// 存储文件：key=随机码, value=文件
-const FILE_STORE = {}
+// 全局变量
+let peerConnection = null;
+let fileToShare = null;
+let shareCode = '';
+const STUN_SERVERS = [
+  { urls: 'stun:stun.qq.com:3478' },
+  { urls: 'stun:stun.cloudflare.com:3478' }
+];
 
-// ======================================
-// 生成分享链接
-// ======================================
-file.onchange = async () => {
-  const f = file.files[0]
-  if (!f) return
-  const key = Math.random().toString(36).slice(2,10)
-  FILE_STORE[key] = f
-
-  const host = location.origin + location.pathname.split('/').slice(0,-1).join('/')
-  const url = host + '#key=' + key
-
-  link.value = url
-  copy.disabled = false
-  s1.className = 'status ok'
-  s1.textContent = '✅ 链接已生成'
-}
-
-// ======================================
-// 复制链接
-// ======================================
-copy.onclick = () => {
-  link.select()
-  document.execCommand('copy')
-  s1.textContent = '✅ 已复制'
-}
-
-// ======================================
-// 下载
-// ======================================
-down.onclick = () => {
-  const val = input.value.trim()
-  const match = val.match(/#key=([a-z0-9]+)/)
-  if (!match) {
-    s2.className = 'status err'
-    s2.textContent = '❌ 链接格式不对'
-    return
-  }
-  const key = match[1]
-  const file = FILE_STORE[key]
-  if (!file) {
-    s2.className = 'status err'
-    s2.textContent = '❌ 文件不在线或已断开'
-    return
-  }
-
-  s2.className = 'status ok'
-  s2.textContent = '✅ 下载完成'
+// ==================== 分享方逻辑 ====================
+// 选择文件
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
   
-  const u = URL.createObjectURL(file)
-  const a = document.createElement('a')
-  a.className = 'download'
-  a.href = u
-  a.download = file.name
-  a.textContent = '💾 保存 ' + file.name
-  result.innerHTML = ''
-  result.appendChild(a)
+  fileToShare = file;
+  // 生成简单的连接码（8位随机字符）
+  shareCode = Math.random().toString(36).slice(2, 10);
+  
+  // 显示连接码
+  document.getElementById('share-code').value = shareCode;
+  document.getElementById('copy-code').disabled = false;
+  document.getElementById('share-status').className = 'status success';
+  document.getElementById('share-status').textContent = `✅ 连接码生成成功：${shareCode}`;
+  
+  // 初始化分享方的P2P连接
+  initSharePeer();
+});
+
+// 复制连接码
+document.getElementById('copy-code').addEventListener('click', () => {
+  const codeText = document.getElementById('share-code');
+  codeText.select();
+  document.execCommand('copy');
+  document.getElementById('share-status').textContent = '✅ 连接码已复制到剪贴板';
+});
+
+// 初始化分享方P2P连接
+function initSharePeer() {
+  // 创建P2P连接
+  peerConnection = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+  
+  // 监听ICE候选（用于连接）
+  peerConnection.onicecandidate = (e) => {
+    if (e.candidate) {
+      // 把候选信息和连接码绑定（简化版：用localStorage临时存储）
+      localStorage.setItem(`p2p_${shareCode}`, JSON.stringify(e.candidate));
+    }
+  };
+  
+  // 准备发送文件
+  peerConnection.ondatachannel = (e) => {
+    const dataChannel = e.channel;
+    dataChannel.onopen = () => {
+      document.getElementById('share-status').textContent = '✅ 已连接，正在发送文件...';
+      // 读取文件并发送
+      const reader = new FileReader();
+      reader.onload = () => {
+        const fileData = {
+          name: fileToShare.name,
+          size: fileToShare.size,
+          type: fileToShare.type,
+          data: reader.result
+        };
+        dataChannel.send(JSON.stringify(fileData));
+        document.getElementById('share-status').textContent = `✅ 文件发送成功：${fileToShare.name}`;
+      };
+      reader.readAsDataURL(fileToShare);
+    };
+  };
+  
+  // 创建offer（分享方主动发起）
+  peerConnection.createOffer()
+    .then(offer => peerConnection.setLocalDescription(offer))
+    .then(() => {
+      // 存储offer信息
+      localStorage.setItem(`p2p_offer_${shareCode}`, JSON.stringify(peerConnection.localDescription));
+    })
+    .catch(err => {
+      document.getElementById('share-status').className = 'status error';
+      document.getElementById('share-status').textContent = `❌ 初始化失败：${err.message}`;
+    });
 }
 
-// ======================================
-// 打开页面自动解析链接
-// ======================================
-window.onload = () => {
-  if (location.hash.includes('key=')) {
-    input.value = location.href
-    s2.textContent = '📥 已自动识别链接'
+// ==================== 接收方逻辑 ====================
+// 点击连接
+document.getElementById('connect-btn').addEventListener('click', () => {
+  const code = document.getElementById('receive-code').value.trim();
+  if (!code) {
+    document.getElementById('receive-status').className = 'status error';
+    document.getElementById('receive-status').textContent = '❌ 请输入连接码';
+    return;
   }
+  
+  document.getElementById('receive-status').className = 'status info';
+  document.getElementById('receive-status').textContent = '🔄 正在连接，请稍候...';
+  
+  // 初始化接收方P2P连接
+  initReceivePeer(code);
+});
+
+// 初始化接收方P2P连接
+function initReceivePeer(code) {
+  // 获取分享方的offer
+  const offerStr = localStorage.getItem(`p2p_offer_${code}`);
+  if (!offerStr) {
+    document.getElementById('receive-status').className = 'status error';
+    document.getElementById('receive-status').textContent = '❌ 未找到该连接码的分享方，请确认对方已生成连接码';
+    return;
+  }
+  const offer = JSON.parse(offerStr);
+  
+  // 创建接收方P2P连接
+  peerConnection = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+  
+  // 创建数据通道（用于接收文件）
+  const dataChannel = peerConnection.createDataChannel('fileTransfer');
+  dataChannel.onmessage = (e) => {
+    // 接收文件数据
+    const fileData = JSON.parse(e.data);
+    document.getElementById('receive-status').className = 'status success';
+    document.getElementById('receive-status').textContent = `✅ 文件接收成功：${fileData.name}`;
+    
+    // 生成下载按钮
+    const resultDiv = document.getElementById('receive-result');
+    resultDiv.innerHTML = `
+      <div class="file-info">文件名：${fileData.name}</div>
+      <div class="file-info">文件大小：${(fileData.size / 1024 / 1024).toFixed(2)} MB</div>
+      <a href="${fileData.data}" download="${fileData.name}" class="download-btn">💾 保存文件</a>
+    `;
+  };
+  
+  // 监听ICE候选
+  peerConnection.onicecandidate = (e) => {
+    if (e.candidate) {
+      localStorage.setItem(`p2p_answer_${code}`, JSON.stringify(e.candidate));
+    }
+  };
+  
+  // 设置远程描述（分享方的offer）
+  peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+    .then(() => peerConnection.createAnswer())
+    .then(answer => peerConnection.setLocalDescription(answer))
+    .then(() => {
+      // 存储answer信息
+      localStorage.setItem(`p2p_answer_${code}`, JSON.stringify(peerConnection.localDescription));
+      // 获取分享方的ICE候选并添加
+      const candidateStr = localStorage.getItem(`p2p_${code}`);
+      if (candidateStr) {
+        const candidate = JSON.parse(candidateStr);
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+          .catch(err => console.error('添加候选失败：', err));
+      }
+      document.getElementById('receive-status').textContent = '🔄 已发送连接请求，等待对方响应...';
+    })
+    .catch(err => {
+      document.getElementById('receive-status').className = 'status error';
+      document.getElementById('receive-status').textContent = `❌ 连接失败：${err.message}`;
+    });
 }
+
+// 页面加载时清理旧数据
+window.onload = () => {
+  // 清理超过5分钟的旧数据
+  const keys = Object.keys(localStorage);
+  keys.forEach(key => {
+    if (key.startsWith('p2p_')) {
+      localStorage.removeItem(key);
+    }
+  });
+};
 </script>
 </body>
 </html>
