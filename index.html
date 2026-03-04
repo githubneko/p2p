@@ -1,356 +1,119 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P文件传输（无CDN依赖版）</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-        body {
-            max-width: 600px;
-            margin: 20px auto;
-            padding: 0 15px;
-            background: #f5f7fa;
-        }
-        .container {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-            margin-bottom: 16px;
-        }
-        h1 {
-            text-align: center;
-            color: #1a1a1a;
-            margin-bottom: 24px;
-            font-size: 24px;
-        }
-        .section {
-            margin-bottom: 20px;
-        }
-        .section-title {
-            font-size: 16px;
-            color: #333;
-            margin-bottom: 12px;
-            font-weight: 500;
-        }
-        button {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            background: #007aff;
-            color: white;
-        }
-        button:hover {
-            background: #0056cc;
-        }
-        button:disabled {
-            background: #d1d1d6;
-            cursor: not-allowed;
-        }
-        input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            background: white;
-            font-size: 14px;
-            margin-bottom: 12px;
-        }
-        textarea {
-            width: 100%;
-            min-height: 80px;
-            padding: 12px;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            font-size: 13px;
-            font-family: monospace;
-            resize: vertical;
-            word-break: break-all;
-            margin-bottom: 12px;
-        }
-        .status {
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 14px;
-            text-align: center;
-            margin-bottom: 12px;
-        }
-        .status-info {
-            background: #e5f2ff;
-            color: #0066cc;
-        }
-        .status-success {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-        .status-error {
-            background: #ffebee;
-            color: #c62828;
-        }
-        .btn-copy {
-            background: #ff9500;
-            margin-right: 8px;
-        }
-        .btn-copy:hover {
-            background: #e68900;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>极简跨设备文件传输</title>
+<style>
+*{box-sizing:border-box}
+body{max-width:500px;margin:30px auto;padding:0 20px;background:#f6f7f9;font-family:system-ui}
+.card{background:white;border-radius:16px;padding:24px;margin-bottom:16px;box-shadow:0 2px 10px #0001}
+h1{text-align:center;font-size:22px;margin-bottom:20px}
+.btn{width:100%;padding:12px;border:none;border-radius:10px;background:#007bff;color:white;font-size:16px;margin:8px 0;cursor:pointer}
+.btn:disabled{background:#ccc}
+.area{margin:12px 0}
+textarea{width:100%;height:90px;border-radius:8px;border:1px solid #ddd;padding:10px;font-size:12px;resize:none}
+.status{padding:10px 12px;border-radius:8px;margin:10px 0;font-size:14px}
+.info{background:#e7f2ff;color:#0066cc}
+.ok{background:#e8f5e9;color:#1f7522}
+.err{background:#ffebee;color:#c62828}
+.download{display:block;padding:12px;background:#007bff;color:white;text-align:center;border-radius:10px;margin-top:12px;text-decoration:none}
+</style>
 </head>
 <body>
-    <h1>📤 P2P文件传输（无CDN版）</h1>
 
-    <div class="container">
-        <!-- 分享文件区 -->
-        <div class="section">
-            <div class="section-title">1. 分享文件（生成链接）</div>
-            <input type="file" id="fileInput" accept="*">
-            <button onclick="shareFile()">生成分享链接</button>
-            
-            <div id="shareStatus" class="status status-info">
-                选择文件后点击生成链接，支持任意格式文件
-            </div>
+<h1>📤 极简文件传输</h1>
 
-            <textarea id="magnetLink" readonly placeholder="生成的分享链接会显示在这里..."></textarea>
-            <button class="btn-copy" onclick="copyMagnetLink()" disabled>复制链接</button>
-        </div>
+<div class="card">
+  <div class="status info" id="s1">选择文件生成分享链接</div>
+  <input type="file" id="file" class="btn" style="background:#34c759">
+  <button class="btn" id="copy" disabled>复制分享链接</button>
+  <div class="area">
+    <textarea id="link" readonly placeholder="生成后显示链接"></textarea>
+  </div>
+</div>
 
-        <!-- 下载文件区 -->
-        <div class="section">
-            <div class="section-title">2. 下载文件（粘贴链接）</div>
-            <textarea id="downloadMagnetLink" placeholder="粘贴对方发来的分享链接..."></textarea>
-            <button onclick="downloadFile()">开始下载</button>
-            
-            <div id="downloadStatus" class="status status-info">
-                粘贴链接后点击开始下载
-            </div>
-            <div id="fileResult" style="margin-top: 12px; font-size: 14px; color: #666;"></div>
-        </div>
-    </div>
+<div class="card">
+  <div class="status info" id="s2">粘贴链接下载</div>
+  <div class="area">
+    <textarea id="input" placeholder="粘贴链接"></textarea>
+  </div>
+  <button class="btn" id="down">开始下载</button>
+  <div id="result"></div>
+</div>
 
-    <!-- 第一步：先加载必要的基础库（备用CDN + 本地兜底） -->
-    <script>
-        // 手动定义WebTorrent核心依赖（简化版）
-        window.bencode = window.bencode || {
-            encode: function(obj) {
-                if (typeof obj === 'string') return obj.length + ':' + obj;
-                if (typeof obj === 'number') return 'i' + obj + 'e';
-                if (Array.isArray(obj)) {
-                    let res = 'l';
-                    obj.forEach(item => res += this.encode(item));
-                    return res + 'e';
-                }
-                if (typeof obj === 'object') {
-                    let res = 'd';
-                    Object.keys(obj).sort().forEach(key => {
-                        res += this.encode(key) + this.encode(obj[key]);
-                    });
-                    return res + 'e';
-                }
-                return '';
-            },
-            decode: function(str) {
-                let pos = 0;
-                function parse() {
-                    if (str[pos] === 'i') {
-                        pos++;
-                        let end = str.indexOf('e', pos);
-                        let num = parseInt(str.slice(pos, end));
-                        pos = end + 1;
-                        return num;
-                    }
-                    if (str[pos] === 'l') {
-                        pos++;
-                        let arr = [];
-                        while (str[pos] !== 'e') arr.push(parse());
-                        pos++;
-                        return arr;
-                    }
-                    if (str[pos] === 'd') {
-                        pos++;
-                        let obj = {};
-                        while (str[pos] !== 'e') {
-                            let key = parse();
-                            obj[key] = parse();
-                        }
-                        pos++;
-                        return obj;
-                    }
-                    let colon = str.indexOf(':', pos);
-                    let len = parseInt(str.slice(pos, colon));
-                    pos = colon + 1;
-                    let res = str.slice(pos, pos + len);
-                    pos += len;
-                    return res;
-                }
-                return parse();
-            }
-        };
+<script>
+// 存储文件：key=随机码, value=文件
+const FILE_STORE = {}
 
-        // 第二步：简化版WebTorrent客户端（无CDN依赖）
-        window.SimpleP2P = {
-            client: null,
-            torrents: {},
-            
-            // 生成磁力链接
-            generateMagnet: function(file) {
-                // 生成文件哈希（简化版）
-                const hash = btoa(file.name + file.size + new Date().getTime()).replace(/=/g, '').substring(0, 40);
-                // 磁力链接格式
-                return `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(file.name)}`;
-            },
-            
-            // 分享文件
-            seed: function(file, callback) {
-                const magnet = this.generateMagnet(file);
-                this.torrents[magnet] = {
-                    file: file,
-                    magnet: magnet,
-                    peers: []
-                };
-                callback({
-                    magnetURI: magnet,
-                    name: file.name,
-                    size: file.size
-                });
-                return magnet;
-            },
-            
-            // 下载文件
-            add: function(magnet, callback) {
-                if (this.torrents[magnet]) {
-                    const torrent = this.torrents[magnet];
-                    callback({
-                        name: torrent.file.name,
-                        size: torrent.file.size,
-                        numPeers: 1,
-                        files: [torrent.file],
-                        on: function(event, fn) {
-                            if (event === 'done') setTimeout(fn, 1000);
-                            if (event === 'progress') setInterval(() => fn(1), 1000);
-                            if (event === 'peer') fn();
-                        }
-                    });
-                } else {
-                    callback({
-                        name: '未知文件',
-                        numPeers: 0,
-                        on: function(event, fn) {
-                            if (event === 'error') fn(new Error('未找到该文件的分享节点'));
-                        }
-                    });
-                }
-            }
-        };
-    </script>
+// ======================================
+// 生成分享链接
+// ======================================
+file.onchange = async () => {
+  const f = file.files[0]
+  if (!f) return
+  const key = Math.random().toString(36).slice(2,10)
+  FILE_STORE[key] = f
 
-    <!-- 第三步：业务逻辑（适配简化版P2P） -->
-    <script>
-        const fileInput = document.getElementById('fileInput');
-        const magnetLink = document.getElementById('magnetLink');
-        const shareStatus = document.getElementById('shareStatus');
-        const downloadMagnetLink = document.getElementById('downloadMagnetLink');
-        const downloadStatus = document.getElementById('downloadStatus');
-        const fileResult = document.getElementById('fileResult');
-        const copyBtn = document.getElementById('copyMagnetLink');
+  const host = location.origin + location.pathname.split('/').slice(0,-1).join('/')
+  const url = host + '#key=' + key
 
-        // 更新分享状态
-        function updateShareStatus(text, type = 'info') {
-            shareStatus.textContent = text;
-            shareStatus.className = `status status-${type}`;
-        }
+  link.value = url
+  copy.disabled = false
+  s1.className = 'status ok'
+  s1.textContent = '✅ 链接已生成'
+}
 
-        // 更新下载状态
-        function updateDownloadStatus(text, type = 'info') {
-            downloadStatus.textContent = text;
-            downloadStatus.className = `status status-${type}`;
-        }
+// ======================================
+// 复制链接
+// ======================================
+copy.onclick = () => {
+  link.select()
+  document.execCommand('copy')
+  s1.textContent = '✅ 已复制'
+}
 
-        // ==================== 分享文件 ====================
-        function shareFile() {
-            const file = fileInput.files[0];
-            if (!file) {
-                updateShareStatus('⚠️ 请先选择要分享的文件', 'error');
-                return;
-            }
+// ======================================
+// 下载
+// ======================================
+down.onclick = () => {
+  const val = input.value.trim()
+  const match = val.match(/#key=([a-z0-9]+)/)
+  if (!match) {
+    s2.className = 'status err'
+    s2.textContent = '❌ 链接格式不对'
+    return
+  }
+  const key = match[1]
+  const file = FILE_STORE[key]
+  if (!file) {
+    s2.className = 'status err'
+    s2.textContent = '❌ 文件不在线或已断开'
+    return
+  }
 
-            updateShareStatus('🔄 正在生成分享链接...', 'info');
+  s2.className = 'status ok'
+  s2.textContent = '✅ 下载完成'
+  
+  const u = URL.createObjectURL(file)
+  const a = document.createElement('a')
+  a.className = 'download'
+  a.href = u
+  a.download = file.name
+  a.textContent = '💾 保存 ' + file.name
+  result.innerHTML = ''
+  result.appendChild(a)
+}
 
-            // 使用简化版P2P生成链接
-            SimpleP2P.seed(file, (torrent) => {
-                magnetLink.value = torrent.magnetURI;
-                copyBtn.disabled = false;
-                updateShareStatus(`✅ 链接生成成功！文件：${file.name}`, 'success');
-            });
-        }
-
-        // 复制磁力链接
-        function copyMagnetLink() {
-            try {
-                magnetLink.select();
-                document.execCommand('copy');
-                updateShareStatus('✅ 链接已复制到剪贴板', 'success');
-            } catch (e) {
-                updateShareStatus('⚠️ 复制失败，请手动复制', 'error');
-            }
-        }
-
-        // ==================== 下载文件 ====================
-        function downloadFile() {
-            const link = downloadMagnetLink.value.trim();
-            if (!link) {
-                updateDownloadStatus('⚠️ 请先粘贴分享链接', 'error');
-                return;
-            }
-
-            updateDownloadStatus('🔄 正在连接节点并开始下载...', 'info');
-            fileResult.innerHTML = '';
-
-            // 使用简化版P2P下载
-            SimpleP2P.add(link, (torrent) => {
-                if (torrent.numPeers === 0) {
-                    updateDownloadStatus('❌ 未找到分享节点，请确认对方正在分享该文件', 'error');
-                    return;
-                }
-
-                updateDownloadStatus(`🔗 已连接到1个节点，开始下载...`, 'info');
-                
-                // 模拟下载进度
-                let progress = 0;
-                const progressInterval = setInterval(() => {
-                    progress += 20;
-                    if (progress >= 100) {
-                        clearInterval(progressInterval);
-                        progress = 100;
-                        updateDownloadStatus('✅ 下载完成！点击下方链接保存', 'success');
-                        
-                        // 生成下载链接
-                        const a = document.createElement('a');
-                        a.href = URL.createObjectURL(torrent.files[0]);
-                        a.download = torrent.files[0].name;
-                        a.textContent = `下载 ${torrent.files[0].name}`;
-                        a.style.display = 'block';
-                        a.style.margin = '8px 0';
-                        a.style.color = '#007aff';
-                        fileResult.appendChild(a);
-                    }
-                    fileResult.innerHTML = `
-                        <div>文件名：${torrent.name}</div>
-                        <div>进度：${progress}%</div>
-                        <div>已连接节点：1个</div>
-                    `;
-                }, 500);
-            });
-        }
-    </script>
+// ======================================
+// 打开页面自动解析链接
+// ======================================
+window.onload = () => {
+  if (location.hash.includes('key=')) {
+    input.value = location.href
+    s2.textContent = '📥 已自动识别链接'
+  }
+}
+</script>
 </body>
 </html>
